@@ -13,7 +13,15 @@ See [DATASET.md](doc/DATASET.md) for instructions dataset.
 
 ## Getting Started
 
-## Quick Start: Full Pipeline with Sample Script
+### Quick Start: Full Pipeline with Sample Script
+
+For a complete pipeline (warmup → training → rendering → metrics) with a specific scene, policy, and budget:
+
+```bash
+bash exp_sample.sh
+```
+
+Configure the script by editing these variables at the top:
 
 
 ## Quick Start: Full Pipeline with Debug Script
@@ -322,10 +330,11 @@ output/
 If you find this repository/work helpful in your research, welcome to cite these papers and give a ⭐.
 
 ```
-@InProceedings{Sun_2025,
-    author    = {Sun, Yuan-Chun and Chen, Guodong and Kondori, Sam Ziaie and Dasari, Mallesham and Hsu, Cheng-Hsin},
-    title     = {Layered Mesh-Gaussian},
-    year      = {2025},
+@inproceedings{sun2026lmg,
+  title={LMG: Efficient Streaming of Layered Mesh–Gaussian 3D Scenes},
+  author={Sun, Yuan-Chun and Chen, Guodong and Kondori, Sam Ziaie and Dasari, Mallesham and Hsu, Cheng-Hsin},
+  booktitle={Proceedings of the 17th ACM Multimedia Systems Conference},
+  year={2026}
 }
 ```
 

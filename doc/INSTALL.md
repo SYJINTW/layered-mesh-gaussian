@@ -24,7 +24,7 @@ conda env config vars set CUDA_HOME=/usr/local/cuda-11.7
 conda env config vars set PATH=/usr/local/cuda-11.7/bin:$PATH
 conda env config vars set LD_LIBRARY_PATH=/usr/local/cuda-11.7/lib64:$LD_LIBRARY_PATH
 conda deactivate
-conda activate meshsplat
+conda activate lmg
 ```
 
 Verify installation:

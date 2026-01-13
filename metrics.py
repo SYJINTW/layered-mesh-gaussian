@@ -33,7 +33,7 @@ def readImages(renders_dir, gt_dir):
         image_names.append(fname)
     return renders, gts, image_names
 
-def evaluate(gs_type, model_paths):
+def evaluate(gs_type, model_paths, skip_lpips=False):
 
     full_dict = {}
     per_view_dict = {}
@@ -82,8 +82,10 @@ def evaluate(gs_type, model_paths):
                     lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
                     
                     # [NOTE] skip LPIPS to save time for now
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
-                    # lpipss.append(-1.0)
+                    if skip_lpips:
+                        lpipss.append(-1.0)
+                    else:
+                        lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
                     
                     
 
@@ -116,5 +118,6 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Metrics script parameters")
     parser.add_argument('--model_paths', '-m', required=True, nargs="+", type=str, default=[])
     parser.add_argument('--gs_type', type=str, default="gs_flat")
+    parser.add_argument('--skip_lpips', action="store_true", help="Skip LPIPS computation to save time")
     args = parser.parse_args()
-    evaluate(args.gs_type, args.model_paths)
+    evaluate(args.gs_type, args.model_paths, args.skip_lpips)

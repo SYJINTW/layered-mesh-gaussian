@@ -29,7 +29,7 @@ MESH_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/meshes" #! Change to your mesh pat
 # ITERATION="15000"
 ITERATION="30"
 # SAVE_ITERATIONS=("7000") 
-SAVE_ITERATIONS=("10" "20") # Need to fill in some iterations or it will failed
+SAVE_ITERATIONS=("10") # Need to fill in some iterations or it will failed
 
 EXP_NAME="sample_exp" #! Change to your experiment name
 
@@ -43,6 +43,8 @@ RESOLUTION="" # or "--resolution 4" for faster debugging
 IS_WHITE_BG="" # set to "--white_background" if the dataset has white background
 
 DEBUGGING_FREQ="10"
+
+SKIP_LPIPS=true # true or false; set to true to skip lpips computation to save time
 
 for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
     DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}" 
@@ -120,44 +122,44 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
 
                 exp_start=$(date +%s)
 
-                # ======= Step 0: Warmup ======
-                echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
-                warmup_start=$(date +%s)
-                if python warmup.py --eval \
-                    --warmup_only \
-                    -s "$DATASET_DIR" \
-                    -m "$SAVE_DIR" \
-                    --texture_obj_path "$MESH_FILE" \
-                    --mesh_type "$MESH_TYPE" \
-                    --debugging \
-                    --debug_freq "$DEBUGGING_FREQ" \
-                    $IS_OCCLUSION \
-                    --total_splats "$budget" \
-                    --alloc_policy "$policy" \
-                    --gs_type gs_mesh \
-                    --policy_path "$POLICY_CACHED" \
-                    --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                    $IS_WHITE_BG \
-                    $RESOLUTION \
-                    --iteration 1 \
-                    --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                    # >> "$LOG_FILE" ; then
-                then
+                # # ======= Step 0: Warmup ======
+                # echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
+                # warmup_start=$(date +%s)
+                # if python warmup.py --eval \
+                #     --warmup_only \
+                #     -s "$DATASET_DIR" \
+                #     -m "$SAVE_DIR" \
+                #     --texture_obj_path "$MESH_FILE" \
+                #     --mesh_type "$MESH_TYPE" \
+                #     --debugging \
+                #     --debug_freq "$DEBUGGING_FREQ" \
+                #     $IS_OCCLUSION \
+                #     --total_splats "$budget" \
+                #     --alloc_policy "$policy" \
+                #     --gs_type gs_mesh \
+                #     --policy_path "$POLICY_CACHED" \
+                #     --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                #     $IS_WHITE_BG \
+                #     $RESOLUTION \
+                #     --iteration 1 \
+                #     --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                #     >> "$LOG_FILE" ; then
                     
-                    # this is warmup
+                #     # this is warmup
 
-                    warmup_end=$(date +%s)
-                    warmup_secs=$((warmup_end - warmup_start))
-                    echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
-                    exp_status="WARMUP_SUCCESS"
-                else
-                    warmup_end=$(date +%s)
-                    warmup_secs=$((warmup_end - warmup_start))
-                    exp_status="WARMUP_FAILED"
-                    failed_experiments=$((failed_experiments + 1))
-                    echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                fi
+                #     warmup_end=$(date +%s)
+                #     warmup_secs=$((warmup_end - warmup_start))
+                #     echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
+                #     exp_status="WARMUP_SUCCESS"
+                # else
+                #     warmup_end=$(date +%s)
+                #     warmup_secs=$((warmup_end - warmup_start))
+                #     exp_status="WARMUP_FAILED"
+                #     failed_experiments=$((failed_experiments + 1))
+                #     echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                # fi
 
+                
                 # # ======= Step 1: Train ======
                 # if [ "$exp_status" = "WARMUP_SUCCESS" ]; then
                 #     echo "Step 1/3: Running training..." | tee -a "$LOG_FILE"
@@ -237,63 +239,71 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                 #     exp_status="RENDER_FAILED"
                 # fi
                 
-                # exp_status="RENDER_SUCCESS"
-                # # ======= Step 3: Metrics ======
-                # if [ "$exp_status" = "RENDER_SUCCESS" ]; then
-                #     echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
-                #     metrics_start=$(date +%s)
-                #     if python metrics.py \
-                #         -m "$SAVE_DIR" \
-                #         --gs_type gs_mesh >> "$LOG_FILE"; then
+                exp_status="RENDER_SUCCESS"
+                # ======= Step 3: Metrics ======
+                if [ "$exp_status" = "RENDER_SUCCESS" ]; then
+                    echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
+                    metrics_start=$(date +%s)
+                    
+                    if [ "$SKIP_LPIPS" = true ]; then
+                        SKIP_LPIPS_ARG="--skip_lpips"
+                    else
+                        SKIP_LPIPS_ARG=""
+                    fi
+
+                    if python metrics.py \
+                        -m "$SAVE_DIR" \
+                        --gs_type gs_mesh $SKIP_LPIPS_ARG \
+                        >> "$LOG_FILE"; then
                         
-                #         metrics_end=$(date +%s)
-                #         metrics_secs=$((metrics_end - metrics_start))
-                #         echo "Metrics completed in $(fmt_time $metrics_secs) (${metrics_secs}s)." | tee -a "$LOG_FILE"
-                #         exp_status="SUCCESS"
+                        metrics_end=$(date +%s)
+                        metrics_secs=$((metrics_end - metrics_start))
+                        echo "Metrics completed in $(fmt_time $metrics_secs) (${metrics_secs}s)." | tee -a "$LOG_FILE"
+                        exp_status="SUCCESS"
 
-                #         # Copy results JSON for plotting
-                #         RESULTS_JSON="${SAVE_DIR}/results_gs_mesh.json"
-                #         PLOT_JSON="${PLOT_DIR}/${policy}_${budget}_${occlusion_tag}.json"
+                        # Copy results JSON for plotting
+                        RESULTS_JSON="${SAVE_DIR}/results_gs_mesh.json"
+                        PLOT_JSON="${PLOT_DIR}/${policy}_${budget}_${occlusion_tag}.json"
 
-                #         if [ -f "$RESULTS_JSON" ]; then
-                #             cp "$RESULTS_JSON" "$PLOT_JSON"
-                #             echo "Results copied to: $PLOT_JSON" | tee -a "$LOG_FILE"
-                #         else
-                #             echo "WARNING: Results file not found at $RESULTS_JSON" | tee -a "$LOG_FILE"
-                #         fi
-                #     else
-                #         metrics_end=$(date +%s)
-                #         metrics_secs=$((metrics_end - metrics_start))
-                #         exp_status="METRICS_FAILED"
-                #         failed_experiments=$((failed_experiments + 1))
-                #         echo "ERROR: Metrics failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${metrics_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                #     fi
-                # fi
+                        if [ -f "$RESULTS_JSON" ]; then
+                            cp "$RESULTS_JSON" "$PLOT_JSON"
+                            echo "Results copied to: $PLOT_JSON" | tee -a "$LOG_FILE"
+                        else
+                            echo "WARNING: Results file not found at $RESULTS_JSON" | tee -a "$LOG_FILE"
+                        fi
+                    else
+                        metrics_end=$(date +%s)
+                        metrics_secs=$((metrics_end - metrics_start))
+                        exp_status="METRICS_FAILED"
+                        failed_experiments=$((failed_experiments + 1))
+                        echo "ERROR: Metrics failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${metrics_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                    fi
+                fi
 
-                # exp_end=$(date +%s)
-                # exp_secs=$((exp_end - exp_start))
-                # total_exp_seconds=$((total_exp_seconds + exp_secs))
+                exp_end=$(date +%s)
+                exp_secs=$((exp_end - exp_start))
+                total_exp_seconds=$((total_exp_seconds + exp_secs))
 
-                # {
-                #     echo ""
-                #     echo "-----------------------------------------------------------------"
-                #     echo "Finished pipeline: policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}"
-                #     echo "Final Status: ${exp_status}"
-                #     echo "Total duration: $(fmt_time $exp_secs) (${exp_secs}s)"
-                #     echo "  - Warmup:  $(fmt_time $warmup_secs) (${warmup_secs}s)"
-                #     echo "  - Train:   $(fmt_time $train_secs) (${train_secs}s)"
-                #     echo "  - Render:  $(fmt_time $render_secs) (${render_secs}s)"
-                #     echo "  - Metrics: $(fmt_time $metrics_secs) (${metrics_secs}s)"
-                #     echo "-----------------------------------------------------------------"
-                #     echo ""
-                # } | tee -a "$LOG_FILE"
+                {
+                    echo ""
+                    echo "-----------------------------------------------------------------"
+                    echo "Finished pipeline: policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}"
+                    echo "Final Status: ${exp_status}"
+                    echo "Total duration: $(fmt_time $exp_secs) (${exp_secs}s)"
+                    echo "  - Warmup:  $(fmt_time $warmup_secs) (${warmup_secs}s)"
+                    echo "  - Train:   $(fmt_time $train_secs) (${train_secs}s)"
+                    echo "  - Render:  $(fmt_time $render_secs) (${render_secs}s)"
+                    echo "  - Metrics: $(fmt_time $metrics_secs) (${metrics_secs}s)"
+                    echo "-----------------------------------------------------------------"
+                    echo ""
+                } | tee -a "$LOG_FILE"
 
-                # # Copy log file to centralized log directory
-                # LOG_FILE_COPY="${BASE_LOG_DIR}/log_pipeline_${policy}_${budget}_${occlusion_tag}.log"
-                # cp "$LOG_FILE" "$LOG_FILE_COPY"
+                # Copy log file to centralized log directory
+                LOG_FILE_COPY="${BASE_LOG_DIR}/log_pipeline_${policy}_${budget}_${occlusion_tag}.log"
+                cp "$LOG_FILE" "$LOG_FILE_COPY"
 
-                # printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n" \
-                #     "$policy" "$budget" "$occlusion_tag" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$exp_secs" "$exp_status" >> "$TIMING_SUMMARY"
+                printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n" \
+                    "$policy" "$budget" "$occlusion_tag" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$exp_secs" "$exp_status" >> "$TIMING_SUMMARY"
             done
         done
     done
