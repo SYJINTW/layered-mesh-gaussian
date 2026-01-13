@@ -1,5 +1,17 @@
 # Layered Mesh-Gaussian
 
+[Yuan-Chun Sun](https://syjintw.github.io/) <sup>1</sup>,
+[Guodong Chen](#) <sup>2</sup>,
+[Sam Ziaie Kondori](#) <sup>1</sup>,
+[Mallesham Dasari](#) <sup>2</sup>,
+[Cheng-Hsin Hsu](https://aiins.cs.nthu.edu.tw/cheng-hsin-hsu/) <sup>1</sup> <br>
+ <sup>1</sup> National Tsing Hua University, <sup>2</sup> Northeastern University<br>
+ <br> 
+
+**Accepted by ACM Multimedia Systems Conference 2026 (MMSys'25)** <br>
+
+## Introduction
+
 Layered Mesh-Gaussian (LMG) is a research implementation built upon the official ["GaMeS: Mesh-Based Adapting and Modification of Gaussian Splatting"](https://arxiv.org/abs/2402.01459).  
 This project extends the original [official codebase](https://waczjoan.github.io/gaussian-mesh-splatting/) with additional utilities and experimental workflows for mesh-driven Gaussian Splatting and hybrid 3D representation rendering.
 
@@ -338,4 +350,4 @@ If you find this repository/work helpful in your research, welcome to cite these
 }
 ```
 
-Last update: Nov 30, 2025
+Last update: Jan 14, 2026
