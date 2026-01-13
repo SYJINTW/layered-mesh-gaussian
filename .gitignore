@@ -19,5 +19,6 @@ debug*.ply
 *debug*/
 plots/
 
+dataset
 output_*/
 exp_script_*/

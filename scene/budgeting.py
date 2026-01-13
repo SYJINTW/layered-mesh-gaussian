@@ -793,6 +793,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         if self.p3d_mesh is not None:
             print("[DEBUG] Using provided p3d_mesh")
             
+            print(type(self.p3d_mesh))
             assert isinstance(self.p3d_mesh, Meshes), "[ERROR] Provided p3d_mesh is not a PyTorch3D Meshes object"
             return (
                 self.p3d_mesh,

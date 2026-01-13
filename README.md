@@ -7,7 +7,14 @@ This project extends the original [official codebase](https://waczjoan.github.io
 
 See [INSTALL.md](doc/INSTALL.md) for instructions environment setup.
 
+## Setup Dataset
+
+See [DATASET.md](doc/DATASET.md) for instructions dataset.
+
 ## Getting Started
+
+## Quick Start: Full Pipeline with Sample Script
+
 
 ## Quick Start: Full Pipeline with Debug Script
 

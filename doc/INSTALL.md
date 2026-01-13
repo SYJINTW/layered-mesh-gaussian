@@ -1,10 +1,10 @@
-# Installation Guide for LMG Model Training
+# Guide for Environment Setup
 
 ## 1. Create the Conda Environment
 
 ```bash
-conda create --name meshsplat python=3.8
-conda activate meshsplat
+conda create --name lmg python=3.8
+conda activate lmg
 ```
 
 ## 2. Configure CUDA (tested with CUDA 11.7) and PyTorch
@@ -56,16 +56,25 @@ pip install -r requirements.txt
 ## 4. Setup Submodules
 
 ```
-pip install ./submodules/diff-gaussian-rasterization
+pip install ./submodules/diff-gaussian-rasterization-lmg
 pip install ./submodules/simple-knn
 ```
 
-## 5. Build and Install PyTorch3D
+## 5. Install and Build External Libraries
 
+### PyTorch3D
 ```
 mkdir ext
 cd ext
 git clone https://github.com/facebookresearch/pytorch3d.git
 cd pytorch3d
 pip install -e .
+```
+
+### Nvdiffrast
+```
+cd ext
+git clone https://github.com/NVlabs/nvdiffrast.git
+cd nvdiffrast
+pip install -e . --no-build-isolation
 ```
