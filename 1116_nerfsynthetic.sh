@@ -22,7 +22,7 @@ WHETHER_OCCLUSION=("--occlusion" )
 
 ITERATION="15000"
 
-EXP_NAME="1116_nerfsynthetic"
+EXP_NAME="0114_nerfsynthetic"
 
 SCENE_NAME="hotdog" # add a loop for multiple scenes if needed
 DATASET_DIR="/mnt/data1/samk/NEU/dataset/${SCENE_NAME}" 

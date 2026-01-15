@@ -98,6 +98,9 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
     
     # Get initial vertices
     vertices = gaussians.vertices.clone()
+    # Capture initial triangle indices to restore later
+    initial_triangle_indices = gaussians.triangle_indices.clone()
+
     mesh_vert = textured_mesh.verts_packed().clone() if textured_mesh is not None else None
     
     # Choose indexes if you want to change only part of the mesh
@@ -175,6 +178,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
         if idx == 0:
             print(f"[DEBUG] all triangles shape: {all_triangles_cpu.shape}")
             print(f"[DEBUG] selected triangles shape: {triangles.shape}")
+            print(f"[DEBUG] GS vertices range: {vertices.min(dim=0).values} to {vertices.max(dim=0).values}")
+            print(f"[DEBUG] Mesh vertices range: {mesh_vert.min(dim=0).values} to {mesh_vert.max(dim=0).values}")
         
         # Load precaptured mesh background and depth if available
         bg = None
@@ -217,9 +222,6 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
             
         elif gs_type == "gs_mesh":
             
-            # [NOTE] debug for now
-            # bg = pure_bg
-            # bg_depth = pure_bg_depth
             
             # [NOTE] to render base layer only
             # gaussians._opacity = torch.full_like(gaussians._opacity, -1e10) # effectively transparent gaussians
@@ -262,6 +264,11 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
             torchvision.utils.save_image(rendering, os.path.join(debug_path, '{0:05d}_rendering'.format(idx) + ".png"))
             # torchvision.utils.save_image(gt, os.path.join(debug_path, '{0:05d}_gt'.format(idx) + ".png"))
 
+    # Restore the gaussians to their original state
+    # This prevents the deformation from persisting to the next render_set call (e.g. train set)
+    gaussians.vertices = vertices
+    gaussians.triangle_indices = initial_triangle_indices
+
     # [Timing] Calculate and print stats
     loop_end_time = time.time()
     total_loop_time = loop_end_time - loop_start_time
@@ -301,8 +308,9 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
     
     with torch.no_grad():
         gaussians = gaussianModelRender[gs_type](dataset.sh_degree)
-        textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
         
+        # Load scene once to get cameras
+        textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
         scene = Scene(dataset, gaussians,
                      load_iteration=iteration, shuffle=False,
                      policy_path=policy_path,
@@ -327,19 +335,24 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
             'texture_obj_path': texture_obj_path,
             'occlusion': occlusion,
             'policy_path': policy_path,
-            'textured_mesh': scene.textured_mesh,
             'precaptured_mesh_img_path': precaptured_mesh_img_path,
             'transform_func': transform_func
         }
 
-        if not skip_train:
-            render_set(gs_type, dataset.model_path, "train", scene.loaded_iter,
-                      scene.getTrainCameras(), gaussians, pipeline, background,
-                      **render_kwargs)
-
         if not skip_test:
+            # Reload textured mesh for test to ensure independence
+            test_textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
             render_set(gs_type, dataset.model_path, "test", scene.loaded_iter,
                       scene.getTestCameras(), gaussians, pipeline, background,
+                      textured_mesh=test_textured_mesh,
+                      **render_kwargs)
+
+        if not skip_train:
+            # Reload textured mesh for train to ensure independence
+            train_textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
+            render_set(gs_type, dataset.model_path, "train", scene.loaded_iter,
+                      scene.getTrainCameras(), gaussians, pipeline, background,
+                      textured_mesh=train_textured_mesh,
                       **render_kwargs)
     
     render_time = time.time() - render_timer_start

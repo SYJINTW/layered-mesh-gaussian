@@ -9,13 +9,14 @@ MESH_TYPE="milo"
 MESH_FILE="/mnt/data1/samk/NEU/dataset/milo_meshes/${SCENE_NAME}/${SCENE_NAME}.ply"
 MESH_IMG_DIR=$(dirname "$MESH_FILE")
 
-POLICY_CACHED="${MODEL_PATH}/area_140000.npy"
 
 ITERATION="15000"
-BUDGET="148783"
+BUDGET="150000"
 POLICY="area"
 
-MODEL_PATH="output/1125_hotdog_milo/hotdog/${POLICY}_${BUDGET}_occlusion"
+POLICY_CACHED="${MODEL_PATH}/${POLICY}_${BUDGET}.npy"
+
+MODEL_PATH="output/0114_nerfsynthetic/hotdog/${POLICY}_${BUDGET}_occlusion"
 
 # Animation settings
 TRANSFORM="hotdog_fly"  # choices: ficus_sinus, hotdog_fly, ficus_pot, ship_sinus, make_smaller, none
@@ -28,7 +29,7 @@ TRANSFORM="hotdog_fly"  # choices: ficus_sinus, hotdog_fly, ficus_pot, ship_sinu
 # "none": do_not_transform
 
 
-IS_WHITE_BG="-w"  # set to "--white_background" if the dataset has white background
+IS_WHITE_BG=""  # set to "--white_background" if the dataset has white background
 RESOLUTION=""   # or "--resolution 4" for faster debugging
 OCCLUSION="--occlusion"
 
@@ -48,9 +49,8 @@ python render_mesh_splat_animated.py \
     --transform "$TRANSFORM" \
     --iteration "$ITERATION" \
     $IS_WHITE_BG \
-    $RESOLUTION 2>&1 
-
-
+    $RESOLUTION 2>&1
+     
     # --skip_train \
     # --precaptured_mesh_img_path "$MESH_IMG_DIR" \
 } | tee "animate.log" 
