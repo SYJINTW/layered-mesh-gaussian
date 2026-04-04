@@ -113,7 +113,6 @@ def get_num_splats_per_triangle(
         # [DOING] [DONE] save the weights[] 
 
 
-
     # Fallback: uniform distribution using num_splats
     else:
         num_splats_per_triangle = np.full(triangles.shape[0], num_splats, dtype=int)
@@ -124,7 +123,6 @@ def get_num_splats_per_triangle(
     print(f"\tnumber of mesh faces:  {triangles.shape[0]}...")
     print(f"\tAverage points per triangle: {num_pts / triangles.shape[0] if triangles.shape[0] > 0 else 0}...")
         
-
 
     return num_splats_per_triangle
 
@@ -142,15 +140,13 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         min_splats_per_tri: int = 0,
         max_splats_per_tri: int = 8,
         mesh_type: str = "sugar",
-        textured_mesh = None
+        textured_mesh = None,
         # <<<< [SAM] add
 ) -> SceneInfo:
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
     test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
-    
-    
     
     # not priority for now: clean all the mesh loading logic into one place.
     # [DONE] a workaround to send loaded-texture-mesh to budgeting.py
@@ -160,7 +156,6 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
     else:
         print(f"[INFO] Reading Mesh object from {texture_obj_path}")
         mesh_scene = trimesh.load(texture_obj_path, force='mesh')
-
 
     # >>>> [YC] add: because the mesh is generated from torch3d, so need to rotate
     mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(

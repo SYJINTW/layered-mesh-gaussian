@@ -29,7 +29,7 @@ from pytorch3d.io import load_objs_as_meshes
 import trimesh
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesVertex
-from train import load_textured_mesh
+from train import load_textured_mesh, load_textured_mesh_for_nvdiffrast
 
 import json
 import time
@@ -146,7 +146,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                 policy_path : str = None,
                 mesh_type : str = "colmap",
                 textured_mesh = None,
-                precaptured_mesh_img_path : str = None
+                precaptured_mesh_img_path : str = None,
+                mesh_rasterizer_type : str = "pytorch3d"
                 # <<<< [YC] add
                 ):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), f"renders_{gs_type}")
@@ -170,8 +171,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
         bg_depth = None
         
         if precaptured_mesh_img_path:
-            cached_bg_path = Path(precaptured_mesh_img_path) / "test_mesh_texture" / f"{view.image_name}.png"
-            cached_bg_depth_path = Path(precaptured_mesh_img_path) / "test_mesh_depth" / f"{view.image_name}.pt"
+            cached_bg_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_texture" / f"{view.image_name}.png"
+            cached_bg_depth_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_depth" / f"{view.image_name}.pt"
             
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")
@@ -203,7 +204,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                 rendering = render(view, gaussians, pipeline, 
                                 bg_color=bg, bg_depth=bg_depth,
                                 textured_mesh=textured_mesh,
-                                mesh_background_color=background)["render"] # [YC] using different rasterizer
+                                mesh_background_color=background,
+                                mesh_rasterizer_type=mesh_rasterizer_type)["render"] # [YC] using different rasterizer
                 print("\033[92m [INFO] Render::DTGS using Depth+Texture+GS rasterizer for gs_mesh\033[0m")
                 
             else: 
@@ -211,7 +213,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                 rendering = render(view, gaussians, pipeline, 
                                 bg_color=bg, bg_depth=pure_bg_depth,
                                 textured_mesh=textured_mesh,
-                                mesh_background_color=background)["render"] # [YC] no occlusion handling, always use pure bg and pure depth
+                                mesh_background_color=background,
+                                mesh_rasterizer_type=mesh_rasterizer_type)["render"] # [YC] no occlusion handling, always use pure bg and pure depth
                 print("\033[96m [INFO] Render::TGS using Texture+GS rasterizer for gs_mesh\033[0m")
             
             # >>>> [YC] add for debug images
@@ -222,7 +225,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                 _pure_bg = _pure_bg.expand(3, view.image_height, view.image_width)
                 _pure_bg_depth = torch.full((1, view.image_height, view.image_width), 0, dtype=torch.float32, device="cuda")
                 _rendering = render(view, gaussians, pipeline, 
-                            bg_color=_pure_bg, bg_depth=_pure_bg_depth)["render"]
+                                bg_color=_pure_bg, bg_depth=_pure_bg_depth)["render"]
                 torchvision.utils.save_image(_rendering, os.path.join(debug_path, '{0:05d}_pure_gs'.format(idx) + ".png"))
             # <<<< [YC] add for debug images
             
@@ -242,15 +245,19 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline :
                 texture_obj_path : str = None,
                 occlusion: bool = False,
                 policy_path : str = None,
-                precaptured_mesh_img_path : str = None
+                precaptured_mesh_img_path : str = None,
+                mesh_rasterizer_type: str = "pytorch3d"
                 # <<<< [YC] add
                 ):
     render_timer_start = time.time()
     
     with torch.no_grad():
         gaussians = gaussianModelRender[gs_type](dataset.sh_degree)
-        textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
-        
+        if mesh_rasterizer_type == "pytorch3d":
+            textured_mesh = load_textured_mesh(dataset, texture_obj_path)
+        elif mesh_rasterizer_type == "nvdiffrast":
+            textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
+            
         # [BUG] trace from here to see how ply and policy are loaded
         scene = Scene(dataset, gaussians, 
                       load_iteration=iteration, shuffle=False,
@@ -285,7 +292,8 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline :
             'occlusion': occlusion,
             'policy_path': policy_path,
             'textured_mesh': scene.textured_mesh,
-            'precaptured_mesh_img_path': precaptured_mesh_img_path
+            'precaptured_mesh_img_path': precaptured_mesh_img_path,
+            'mesh_rasterizer_type': mesh_rasterizer_type,
         }
 
         if not skip_train:
@@ -332,8 +340,10 @@ if __name__ == "__main__":
     parser.add_argument("--budget_per_tri", type=float, default=1.0, help="set the total number of splats to be this number * number of triangles")
     # parser.add_argument("--drop_budget", type=int, help="drop until only this number of splats remain in the scene.")
     parser.add_argument('--mesh_type', type=str, default="sugar", help="textured mesh type: sugar, colmap, or others")
-    
     # <<<< [Sam] add
+    
+    parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
+                        help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
     
     
     args = get_combined_args(parser) # get args from both command line and stored file
@@ -358,6 +368,7 @@ if __name__ == "__main__":
                 texture_obj_path=args.texture_obj_path,
                 occlusion=args.occlusion,
                 policy_path=args.policy_path,
-                precaptured_mesh_img_path=args.precaptured_mesh_img_path
+                precaptured_mesh_img_path=args.precaptured_mesh_img_path,
+                mesh_rasterizer_type=args.mesh_rasterizer_type
                 # <<<< [YC] add
                 )

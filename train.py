@@ -70,8 +70,6 @@ import trimesh
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesVertex
 
-from mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
-import cv2
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
@@ -88,7 +86,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             debugging, debug_freq,
             occlusion,
             policy_path,
-            precaptured_mesh_img_path
+            precaptured_mesh_img_path,
+            mesh_rasterizer_type="pytorch3d"
             # <<<< [YC] add
             ):
     
@@ -101,11 +100,12 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         
     # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
     if gs_type == "gs_mesh":
-        textured_mesh = load_textured_mesh(dataset, texture_obj_path)
+        if mesh_rasterizer_type == "pytorch3d":
+            textured_mesh = load_textured_mesh(dataset, texture_obj_path)
+        elif mesh_rasterizer_type == "nvdiffrast":
+            textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
     else:
         textured_mesh = None
-
-
     # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.
     # because, why pass the path when its already loaded right here?
     # <<<< [YC] add
@@ -129,9 +129,11 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     if dataset.warmup_only:
         if not precaptured_mesh_img_path:
             raise ValueError("precaptured_mesh_img_path must be provided for warmup_only mode")
+        
+        # ------------------------------ Training Camera ----------------------------- #
         # Precapture mesh_bg and mesh_bg_depth in warmup stage
-        precaptured_bg_dir = Path(precaptured_mesh_img_path) / "mesh_texture"
-        precaptured_depth_dir = Path(precaptured_mesh_img_path) / "mesh_depth"
+        precaptured_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type /f"mesh_texture"
+        precaptured_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / f"mesh_depth"
         
         # Ensure directories exist
         precaptured_bg_dir.mkdir(parents=True, exist_ok=True)
@@ -149,16 +151,13 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                 print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
                 continue
             
-            
-            # [DONE] fix black background issue in precapture stage
-            # didn't pass bg=[0,0,0] into the mesh_renderer_pytorch3d()
             # Render background and depth
-            
             bg_color = (1,1,1) if dataset.white_background else (0,0,0)
             render_pkg = render(cam, gaussians, pipe, 
                                 bg_color=None, bg_depth=None, 
                                 textured_mesh=scene.textured_mesh,
-                                mesh_background_color=bg_color
+                                mesh_background_color=bg_color,
+                                mesh_rasterizer_type=mesh_rasterizer_type
                                 )
             
             # Save background image
@@ -173,8 +172,9 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             print(f"[INFO] Saved precaptured results for [training] {cam.image_name}")
         
         
-        precaptured_test_bg_dir = Path(precaptured_mesh_img_path) / "test_mesh_texture"
-        precaptured_test_depth_dir = Path(precaptured_mesh_img_path) / "test_mesh_depth"
+        # ------------------------------- Testing Camera ------------------------------ #
+        precaptured_test_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_texture"
+        precaptured_test_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_depth"
         
         precaptured_test_bg_dir.mkdir(parents=True, exist_ok=True)
         precaptured_test_depth_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +188,6 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                 print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
                 continue
             
-            
             # [DONE] fix black background issue in precapture stage
             # didn't pass bg=[0,0,0] into the mesh_renderer_pytorch3d()
             # Render background and depth
@@ -197,7 +196,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             render_pkg = render(cam, gaussians, pipe, 
                                 bg_color=None, bg_depth=None, 
                                 textured_mesh=scene.textured_mesh,
-                                mesh_background_color=bg_color
+                                mesh_background_color=bg_color,
+                                mesh_rasterizer_type=mesh_rasterizer_type
                                 )
             
             # Save background image
@@ -213,8 +213,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         
         
         print("[INFO] Warmup stage complete. Exiting...")
-        exit()
-    # [NOTE] early exit for warmup-only stage     
+        exit() # [NOTE] early exit for warmup-only stage     
     
     
     print("[INFO] Finished Warm-Up, Start Training..." )
@@ -319,7 +318,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         # ------------------------------ Mesh background ----------------------------- #
         
         if precaptured_mesh_img_path:
-            cached_bg_path = Path(precaptured_mesh_img_path) / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
+            cached_bg_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")
                 img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR)  # (W, H)
@@ -334,7 +333,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         # ------------------------------ Mesh depth background ----------------------------- #
         # [TODO] perhaps prefetch everything at the start of training?
         if precaptured_mesh_img_path:
-            cached_bg_depth_path = Path(precaptured_mesh_img_path) / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
+            cached_bg_depth_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
             if cached_bg_depth_path.exists():
                 bg_depth = torch.load(cached_bg_depth_path).unsqueeze(0).to("cuda")
             #     if iteration % debug_freq == 0:
@@ -366,13 +365,13 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             if occlusion: # [YC] use occlusion diff-gaussian-rasterizer for training
                 render_pkg = render(viewpoint_cam, gaussians, pipe, 
                                     bg_color=bg, bg_depth=bg_depth, 
-                                    textured_mesh=scene.textured_mesh) 
+                                    textured_mesh=scene.textured_mesh)
                 # [YC] if there bg or bg_depth isn't provided, but textured mesh is given, it will use mesh renderer to produce bg and bg_depth
                 
             else: # [YC] use original diff-gaussian-rasterizer for training
                 render_pkg = render(viewpoint_cam, gaussians, pipe, 
                                     bg_color=bg, bg_depth=pure_bg_depth, # [YC] no occlusion handling, use pure_bg_depth
-                                    textured_mesh=scene.textured_mesh) 
+                                    textured_mesh=scene.textured_mesh)
                 
                 
         image = render_pkg["render"]
@@ -566,6 +565,8 @@ def load_textured_mesh(dataset, texture_obj_path: str) -> Meshes:
     
     return textured_mesh
 
+def load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path: str) -> Meshes:
+    return trimesh.load(texture_obj_path, force='mesh')
 
 def prepare_output_and_logger(args):
     if not args.model_path:
@@ -645,10 +646,8 @@ if __name__ == "__main__":
     parser.add_argument("--meshes", nargs="+", type=str, default=[])
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    # parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 20_000, 30_000, 60_000, 90_000])
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[3_000, 7_000]) # not used
-    # parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 20_000, 30_000, 60_000, 90_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 10000, 12000, 15000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 20_000, 30_000, 60_000, 90_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
@@ -677,6 +676,9 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_only", action='store_true', help="only run warmup stage and exit, no entering training loop")
     parser.add_argument('--mesh_type', type=str, default="sugar", help="textured mesh type: sugar, colmap, or others")
     
+    parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
+                        help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
+    
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
     lp.num_splats = args.num_splats
@@ -690,7 +692,7 @@ if __name__ == "__main__":
     lp.warmup_only = args.warmup_only
     lp.mesh_type = args.mesh_type.lower()
     # <<<< [Sam] add
-
+    
     op = optimizationParamTypeCallbacks[args.gs_type](parser)
     pp = PipelineParams(parser)
     args = parser.parse_args(sys.argv[1:])
@@ -702,6 +704,9 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
+    if len(args.save_iterations) == 0:
+        print("[WARN] No save iterations specified, defaulting to saving at the end of training.")
+    
     # Start GUI server, configure and run training
     # network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
@@ -715,7 +720,8 @@ if __name__ == "__main__":
         debugging=args.debugging, debug_freq=args.debug_freq,
         occlusion=args.occlusion,
         policy_path=args.policy_path,
-        precaptured_mesh_img_path=args.precaptured_mesh_img_path
+        precaptured_mesh_img_path=args.precaptured_mesh_img_path,
+        mesh_rasterizer_type=args.mesh_rasterizer_type
         # <<<< [YC] add
     )
 

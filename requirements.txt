@@ -6,3 +6,4 @@ chumpy==0.70
 smplx==0.1.28
 open3d==0.17.0
 opencv-python
+setuptools<70.0.0

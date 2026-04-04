@@ -11,7 +11,7 @@ import trimesh
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesVertex
 from pytorch3d.io import load_objs_as_meshes
-from mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
+from renderer.mesh_renderer.mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
 import cv2
 import os 
 import matplotlib.cm as cm
@@ -792,6 +792,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         if self.p3d_mesh is not None:
             print("[DEBUG] Using provided p3d_mesh")
             
+            print(type(self.p3d_mesh))
             assert isinstance(self.p3d_mesh, Meshes), "[ERROR] Provided p3d_mesh is not a PyTorch3D Meshes object"
             return (
                 self.p3d_mesh,

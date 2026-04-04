@@ -33,7 +33,7 @@ def readImages(renders_dir, gt_dir):
         image_names.append(fname)
     return renders, gts, image_names
 
-def evaluate(gs_type, model_paths):
+def evaluate(gs_type, model_paths, skip_lpips=False):
 
     full_dict = {}
     per_view_dict = {}
@@ -79,11 +79,11 @@ def evaluate(gs_type, model_paths):
                     ssims.append(ssim(renders[idx], gts[idx]))
                     psnrs.append(psnr(renders[idx], gts[idx]))
                     
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
-                    
                     # [NOTE] skip LPIPS to save time for now
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
-                    # lpipss.append(-1.0)
+                    if skip_lpips:
+                        lpipss.append(-1.0)
+                    else:
+                        lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
                     
                     
 
@@ -93,11 +93,11 @@ def evaluate(gs_type, model_paths):
                 print("")
 
                 full_dict[scene_dir][method].update({"SSIM": torch.tensor(ssims).mean().item(),
-                                                        "PSNR": torch.tensor(psnrs).mean().item(),
-                                                        "LPIPS": torch.tensor(lpipss).mean().item()})
+                                                    "PSNR": torch.tensor(psnrs).mean().item(),
+                                                    "LPIPS": torch.tensor(lpipss).mean().item()})
                 per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(torch.tensor(ssims).tolist(), image_names)},
-                                                            "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
-                                                            "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)}})
+                                                        "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
+                                                        "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)}})
 
             with open(scene_dir + f"/results_{gs_type}.json", 'w') as fp:
                 json.dump(full_dict[scene_dir], fp, indent=True)
@@ -116,5 +116,6 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Metrics script parameters")
     parser.add_argument('--model_paths', '-m', required=True, nargs="+", type=str, default=[])
     parser.add_argument('--gs_type', type=str, default="gs_flat")
+    parser.add_argument('--skip_lpips', action="store_true", help="Skip LPIPS computation to save time")
     args = parser.parse_args()
-    evaluate(args.gs_type, args.model_paths)
+    evaluate(args.gs_type, args.model_paths, args.skip_lpips)

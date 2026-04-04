@@ -37,7 +37,7 @@ class Scene:
                 # >>>> [YC] add
                 texture_obj_path : str = None, # legacy - use textured_mesh parameter instead
                 policy_path : str = None,
-                textured_mesh = None
+                textured_mesh = None,
                 # <<<< [YC] add
                 ):
         """b
@@ -79,8 +79,7 @@ class Scene:
                     budget_per_tri=args.budget_per_tri,
                     budgeting_policy_name=args.alloc_policy,
                     mesh_type=args.mesh_type,
-                    textured_mesh = textured_mesh
-                    
+                    textured_mesh = textured_mesh,
                 )
             else:
                 scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
@@ -90,7 +89,6 @@ class Scene:
             if args.gs_type == "gs_mesh": #! [YC] need to be aware of gs_type
                 
                 print("Found transforms_train.json file, assuming Blender_Mesh dataset!")
-                
                 
                 # Synthetic scene uses this loader
                 scene_info = sceneLoadTypeCallbacks["Blender_Mesh"](
@@ -104,7 +102,7 @@ class Scene:
                     budget_per_tri=args.budget_per_tri,
                     budgeting_policy_name=args.alloc_policy,
                     mesh_type=args.mesh_type,
-                    textured_mesh = textured_mesh
+                    textured_mesh = textured_mesh,
                     # <<<< [Sam] add
                 )
             elif args.gs_type == "gs_flame":
@@ -211,9 +209,6 @@ class Scene:
             # will use the one defined in mesh-splat/games/scene/gaussian_model_mesh.py
             # under class GaussianMeshModel(GaussianModel)
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
-
-
-
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

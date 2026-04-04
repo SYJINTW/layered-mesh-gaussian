@@ -11,10 +11,12 @@
 
 import torch
 import math
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+# from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from diff_gaussian_rasterization_lmg import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
-from mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
+from renderer.mesh_renderer.mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
+from renderer.mesh_renderer.mesh_renderer_nvdiffrast import mesh_renderer_nvdiffrast
 
 def transform_vertices_function(vertices, c=1):
     vertices = vertices[:, [0, 2, 1]]
@@ -26,7 +28,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
            bg_color: torch.Tensor = None, bg_depth: torch.Tensor = None,
            scaling_modifier = 1.0, override_color = None,
            mesh_background_color=(1.0, 1.0, 1.0), # [TODO] [DOING] enable black background
-           textured_mesh = None):
+           textured_mesh = None,
+           mesh_rasterizer_type = "pytorch3d"):
     """
     Render the scene. 
     
@@ -38,25 +41,46 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
     if bg_color is not None and bg_depth is not None:
         pass  # Both bg_color and bg_depth are provided, no need to render textured mesh
     elif bg_color is None and bg_depth is not None and textured_mesh is not None:
-        bg_color, _, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
-                                                image_height=viewpoint_camera.image_height,
-                                                image_width=viewpoint_camera.image_width,
-                                                background_color=mesh_background_color
-                                                )
+        if mesh_rasterizer_type == "pytorch3d":
+            bg_color, _, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+                                                    image_height=viewpoint_camera.image_height,
+                                                    image_width=viewpoint_camera.image_width,
+                                                    background_color=mesh_background_color
+                                                    )
+        elif mesh_rasterizer_type == "nvdiffrast":
+            bg_color, _, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+                                                    image_height=viewpoint_camera.image_height,
+                                                    image_width=viewpoint_camera.image_width,
+                                                    background_color=mesh_background_color
+                                                    )
     # Using textured mesh for depth
     elif bg_color is not None and bg_depth is None and textured_mesh is not None:
-        _, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+        if mesh_rasterizer_type == "pytorch3d":
+            _, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
                                                 image_height=viewpoint_camera.image_height,
                                                 image_width=viewpoint_camera.image_width,
                                                 background_color=mesh_background_color
                                                 )
+        elif mesh_rasterizer_type == "nvdiffrast":
+            _, bg_depth, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+                                                    image_height=viewpoint_camera.image_height,
+                                                    image_width=viewpoint_camera.image_width,
+                                                    background_color=mesh_background_color
+                                                    )
     # Using textured mesh for both color and depth
     elif bg_color is None and bg_depth is None and textured_mesh is not None:
-        bg_color, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
-                                                image_height=viewpoint_camera.image_height,
-                                                image_width=viewpoint_camera.image_width,
-                                                background_color=mesh_background_color
-                                                )
+        if mesh_rasterizer_type == "pytorch3d":
+            bg_color, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+                                                    image_height=viewpoint_camera.image_height,
+                                                    image_width=viewpoint_camera.image_width,
+                                                    background_color=mesh_background_color
+                                                    )
+        elif mesh_rasterizer_type == "nvdiffrast":
+            bg_color, bg_depth, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+                                                    image_height=viewpoint_camera.image_height,
+                                                    image_width=viewpoint_camera.image_width,
+                                                    background_color=mesh_background_color
+                                                    )
     else:
         raise ValueError("At least one of bg_color, bg_depth, or textured_mesh must be provided.")
                
