@@ -90,6 +90,62 @@ def do_not_transform(vertices, t, idxs=None):
     return vertices
 
 
+def transform_no_anim(vertices, t, idxs=None):
+    """No animation - static mesh."""
+    return vertices
+
+
+def load_cameras_from_json(camera_json_path, dataset):
+    """
+    Load custom camera trajectories from a JSON file.
+    Expected JSON format:
+    {
+        "camera_angle_x": float,
+        "frames": [
+            {
+                "file_path": str,
+                "frame_index": int,
+                "transform_matrix": [[...], [...], [...], [...]]
+            },
+            ...
+        ]
+    }
+    Returns a list of camera objects compatible with CameraInfo.
+    """
+    from scene.cameras import Camera
+    from utils.graphics_utils import getProjectionMatrix
+    
+    with open(camera_json_path, 'r') as f:
+        camera_data = json.load(f)
+    
+    cameras = []
+    camera_angle_x = camera_data.get("camera_angle_x", 0.6911)
+    
+    for idx, frame_data in enumerate(camera_data.get("frames", [])):
+        # Extract transform matrix (4x4)
+        c2w = torch.tensor(frame_data["transform_matrix"], dtype=torch.float32)
+        
+        # Convert camera-to-world to world-to-camera
+        w2c = torch.linalg.inv(c2w)
+        R = w2c[:3, :3].cpu().numpy()
+        T = w2c[:3, 3].cpu().numpy()
+        
+        # Get image dimensions from dataset (or use defaults)
+        image_width = getattr(dataset, 'images', [None])[0].shape[2] if hasattr(dataset, 'images') and len(dataset.images) > 0 else 800
+        image_height = getattr(dataset, 'images', [None])[0].shape[1] if hasattr(dataset, 'images') and len(dataset.images) > 0 else 600
+        
+        # Create a simple camera object
+        camera = Camera(colmap_id=idx, R=R, T=T, 
+                       FoVx=camera_angle_x, FoVy=camera_angle_x,
+                       image=None, gt_alpha_mask=None,
+                       image_name=f"custom_frame_{idx:05d}",
+                       uid=idx)
+        cameras.append(camera)
+    
+    print(f"[INFO] Loaded {len(cameras)} custom cameras from {camera_json_path}")
+    return cameras
+
+
 def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline, background,
                texture_obj_path: str = None,
                occlusion: bool = False,
@@ -304,7 +360,8 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
                 occlusion: bool = False,
                 policy_path: str = None,
                 precaptured_mesh_img_path: str = None,
-                transform_name: str = "hotdog_wave_z"):
+                transform_name: str = "hotdog_wave_z",
+                camera_json_path: str = ""):
     """
     Render animated sets for train/test views.
     """
@@ -336,6 +393,17 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
                      texture_obj_path=texture_obj_path,
                      textured_mesh=textured_mesh)
         
+        # Load custom cameras if provided
+        if camera_json_path and os.path.exists(camera_json_path):
+            print(f"[INFO] Loading custom cameras from: {camera_json_path}")
+            custom_cameras = load_cameras_from_json(camera_json_path, dataset)
+            # Override test cameras with custom cameras
+            test_cameras = custom_cameras
+            train_cameras = custom_cameras  # Re-use custom cameras for both
+        else:
+            test_cameras = scene.getTestCameras()
+            train_cameras = scene.getTrainCameras()
+        
         if hasattr(gaussians, 'update_alpha'):
             gaussians.update_alpha()
         if hasattr(gaussians, 'prepare_vertices'):
@@ -362,7 +430,7 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
             # Reload textured mesh for test to ensure independence
             test_textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
             render_set(gs_type, dataset.model_path, "test", scene.loaded_iter,
-                      scene.getTestCameras(), gaussians, pipeline, background,
+                      test_cameras, gaussians, pipeline, background,
                       textured_mesh=test_textured_mesh,
                       **render_kwargs)
 
@@ -370,7 +438,7 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
             # Reload textured mesh for train to ensure independence
             train_textured_mesh = load_textured_mesh(dataset=dataset, texture_obj_path=texture_obj_path)
             render_set(gs_type, dataset.model_path, "train", scene.loaded_iter,
-                      scene.getTrainCameras(), gaussians, pipeline, background,
+                      train_cameras, gaussians, pipeline, background,
                       textured_mesh=train_textured_mesh,
                       **render_kwargs)
     
@@ -401,6 +469,9 @@ if __name__ == "__main__":
                        choices=["ficus_sinus", "hotdog_wave_z", "hotdog_parabola_z", "hotdog_radial_lift", "hotdog_fly", "ficus_pot", "ship_sinus", "make_smaller", "no_anim", "none"],
                        help="Transformation to apply to mesh vertices")
     
+    # Camera input
+    parser.add_argument("--camera_json", type=str, default="", help="Path to JSON file with custom camera trajectories (optional)")
+
     # Budget and allocation
     parser.add_argument("--total_splats", type=int)
     parser.add_argument("--alloc_policy", type=str, default="area")
@@ -425,6 +496,7 @@ if __name__ == "__main__":
                occlusion=args.occlusion,
                policy_path=args.policy_path,
                precaptured_mesh_img_path=args.precaptured_mesh_img_path,
-               transform_name=args.transform)
+               transform_name=args.transform,
+               camera_json_path=args.camera_json)
     
     print(f"[INFO] Total script execution time: {time.time() - script_start_time:.2f} seconds")

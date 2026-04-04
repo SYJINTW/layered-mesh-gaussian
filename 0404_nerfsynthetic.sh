@@ -252,6 +252,16 @@ for IS_OCCLUSION in "${WHETHER_OCCLUSION[@]}"; do
                     else
                         echo "WARNING: Results file not found at $RESULTS_JSON" | tee -a "$LOG_FILE"
                     fi
+
+                    # Copy animation mp4 if it exists
+                    ANIMATION_VIDEO="${SAVE_DIR}/test/ours_${ITERATION}/"*"_animation.mp4"
+                    for video_file in $ANIMATION_VIDEO; do
+                        if [ -f "$video_file" ]; then
+                            video_basename=$(basename "$video_file")
+                            cp "$video_file" "${BASE_OUTPUT_DIR}/${policy}_${budget}_${occlusion_tag}_${video_basename}"
+                            echo "Animation video copied to: ${BASE_OUTPUT_DIR}/${policy}_${budget}_${occlusion_tag}_${video_basename}" | tee -a "$LOG_FILE"
+                        fi
+                    done
                 else
                     metrics_end=$(date +%s)
                     metrics_secs=$((metrics_end - metrics_start))

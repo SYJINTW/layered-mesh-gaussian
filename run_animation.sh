@@ -18,9 +18,14 @@ MESH_FILE="/mnt/data1/samk/NEU/sorted_dataset/milo_meshes/${SCENE_NAME}/${SCENE_
 USE_OCCLUSION=true
 
 # Animation settings
-TRANSFORM="none"  # choices: ficus_sinus, hotdog_fly, ficus_pot, ship_sinus, make_smaller, none
+# choices: ficus_sinus, hotdog_wave_z, hotdog_parabola_z, hotdog_radial_lift, hotdog_fly, 
+#          ficus_pot, ship_sinus, make_smaller, no_anim, none
+TRANSFORM="hotdog_wave_z"
 FPS=30
 SKIP_TRAIN=true
+
+# Optional: Load custom camera trajectory from JSON file (leave empty to use dataset cameras)
+CAMERA_JSON=""  # example: "custom_cameras.json"
 
 # Optional flags
 IS_WHITE_BG=false
@@ -89,6 +94,10 @@ fi
 
 if [ -n "$RESOLUTION_FACTOR" ]; then
     CMD+=(--resolution "$RESOLUTION_FACTOR")
+fi
+
+if [ -n "$CAMERA_JSON" ] && [ -f "$CAMERA_JSON" ]; then
+    CMD+=(--camera_json "$CAMERA_JSON")
 fi
 
 echo "Running animation render:"
