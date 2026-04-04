@@ -40,13 +40,29 @@ def transform_ficus_sinus(vertices, t, idxs):
     return vertices
 
 
-def transform_hotdog_fly(vertices, t, idxs):
+def transform_hotdog_wave_z(vertices, t, idxs=None):
+    vertices_new = vertices.clone()
+    vertices_new[:, 2] += 0.3 * torch.sin(vertices[:, 0] * torch.pi + t)
+    return vertices_new
+
+
+def transform_hotdog_parabola_z(vertices, t, idxs=None):
     vertices_new = vertices.clone()
     f = torch.sin(t) * 0.5
-    # vertices_new[:, 2] += f * vertices[:, 0] ** 2 # parabola
-    vertices_new[:, 2] += 0.3 * torch.sin(vertices[:, 0] * torch.pi + t)
-    # vertices_new[:, 2] += t * (vertices[:, 0] ** 2 + vertices[:, 1] ** 2) ** (1 / 2) * 0.01
+    vertices_new[:, 2] += f * vertices[:, 0] ** 2
     return vertices_new
+
+
+def transform_hotdog_radial_lift(vertices, t, idxs=None):
+    vertices_new = vertices.clone()
+    radial = (vertices[:, 0] ** 2 + vertices[:, 1] ** 2) ** 0.5
+    vertices_new[:, 2] += t * radial * 0.01
+    return vertices_new
+
+
+def transform_hotdog_fly(vertices, t, idxs=None):
+    # Backward-compatible alias.
+    return transform_hotdog_wave_z(vertices, t, idxs)
 
 
 def transform_ficus_pot(vertices, t, idxs):
@@ -70,7 +86,7 @@ def make_smaller(vertices, t, idxs=None):
     return vertices_new
 
 
-def do_not_transform(vertices, t):
+def do_not_transform(vertices, t, idxs=None):
     return vertices
 
 
@@ -288,7 +304,7 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
                 occlusion: bool = False,
                 policy_path: str = None,
                 precaptured_mesh_img_path: str = None,
-                transform_name: str = "hotdog_fly"):
+                transform_name: str = "hotdog_wave_z"):
     """
     Render animated sets for train/test views.
     """
@@ -297,13 +313,16 @@ def render_sets(gs_type: str, dataset: ModelParams, iteration: int, pipeline: Pi
     # Select transformation function
     transform_funcs = {
         "ficus_sinus": transform_ficus_sinus,
+        "hotdog_wave_z": transform_hotdog_wave_z,
+        "hotdog_parabola_z": transform_hotdog_parabola_z,
+        "hotdog_radial_lift": transform_hotdog_radial_lift,
         "hotdog_fly": transform_hotdog_fly,
         "ficus_pot": transform_ficus_pot,
         "ship_sinus": transform_ship_sinus,
         "make_smaller": make_smaller,
         "none": do_not_transform
     }
-    transform_func = transform_funcs.get(transform_name, transform_hotdog_fly)
+    transform_func = transform_funcs.get(transform_name, transform_hotdog_wave_z)
     print(f"[INFO] Using transformation: {transform_name}")
     
     with torch.no_grad():
@@ -378,8 +397,8 @@ if __name__ == "__main__":
     parser.add_argument("--precaptured_mesh_img_path", type=str, default="")
     
     # Animation options
-    parser.add_argument("--transform", type=str, default="hotdog_fly",
-                       choices=["ficus_sinus", "hotdog_fly", "ficus_pot", "ship_sinus", "make_smaller", "none"],
+    parser.add_argument("--transform", type=str, default="hotdog_wave_z",
+                       choices=["ficus_sinus", "hotdog_wave_z", "hotdog_parabola_z", "hotdog_radial_lift", "hotdog_fly", "ficus_pot", "ship_sinus", "make_smaller", "no_anim", "none"],
                        help="Transformation to apply to mesh vertices")
     
     # Budget and allocation

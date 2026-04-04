@@ -1,77 +1,111 @@
 #!/bin/bash
+set -euo pipefail
 
 export CUDA_VISIBLE_DEVICES=1
 
 # ======= Config ======
-SCENE_NAME="hotdog"
-DATASET_DIR="/mnt/data1/samk/NEU/dataset/${SCENE_NAME}"
-MESH_TYPE="milo"
-MESH_FILE="/mnt/data1/samk/NEU/dataset/milo_meshes/${SCENE_NAME}/${SCENE_NAME}.ply"
-MESH_IMG_DIR=$(dirname "$MESH_FILE")
-
-
+EXP_NAME="0404_ship_animation"
+SCENE_NAME="ship"
 ITERATION="15000"
-BUDGET="150000"
-POLICY="area"
+BUDGET="313547"
+POLICY="distortion"
 
-POLICY_CACHED="${MODEL_PATH}/${POLICY}_${BUDGET}.npy"
+DATASET_DIR="/mnt/data1/samk/NEU/sorted_dataset/${SCENE_NAME}"
+MESH_TYPE="milo"
+MESH_FILE="/mnt/data1/samk/NEU/sorted_dataset/milo_meshes/${SCENE_NAME}/${SCENE_NAME}.ply"
 
-MODEL_PATH="output/0114_nerfsynthetic/hotdog/${POLICY}_${BUDGET}_occlusion"
+# Set to true if this checkpoint was trained with occlusion enabled.
+USE_OCCLUSION=true
 
 # Animation settings
-TRANSFORM="hotdog_fly"  # choices: ficus_sinus, hotdog_fly, ficus_pot, ship_sinus, make_smaller, none
+TRANSFORM="none"  # choices: ficus_sinus, hotdog_fly, ficus_pot, ship_sinus, make_smaller, none
+FPS=30
+SKIP_TRAIN=true
 
-# "ficus_sinus": transform_ficus_sinus,
-# "hotdog_fly": transform_hotdog_fly,
-# "ficus_pot": transform_ficus_pot,
-# "ship_sinus": transform_ship_sinus,
-# "make_smaller": make_smaller,
-# "none": do_not_transform
+# Optional flags
+IS_WHITE_BG=false
+RESOLUTION_FACTOR=""  # example: 4
 
+if [ "$USE_OCCLUSION" = true ]; then
+    OCCLUSION_TAG="occlusion"
+else
+    OCCLUSION_TAG="no_occlusion"
+fi
 
-IS_WHITE_BG=""  # set to "--white_background" if the dataset has white background
-RESOLUTION=""   # or "--resolution 4" for faster debugging
-OCCLUSION="--occlusion"
-
-
-# ======= Run Animation ======
-{
-python render_mesh_splat_animated.py \
-    -m "$MODEL_PATH" \
-    -s "$DATASET_DIR" \
-    --gs_type gs_mesh \
-    $OCCLUSION \
-    --total_splats "$BUDGET" \
-    --alloc_policy "$POLICY" \
-    --texture_obj_path "$MESH_FILE" \
-    --mesh_type "$MESH_TYPE" \
-    --policy_path "$POLICY_CACHED" \
-    --transform "$TRANSFORM" \
-    --iteration "$ITERATION" \
-    $IS_WHITE_BG \
-    $RESOLUTION 2>&1
-     
-    # --skip_train \
-    # --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-} | tee "animate.log" 
-
-
+MODEL_PATH="output/${EXP_NAME}/${SCENE_NAME}/${POLICY}_${BUDGET}_${OCCLUSION_TAG}"
+POLICY_CACHED="${MODEL_PATH}/${POLICY}_${BUDGET}.npy"
+LOG_PATH="${MODEL_PATH}/animate_${TRANSFORM}_${ITERATION}.log"
 
 RENDER_DIR="${MODEL_PATH}/test/ours_${ITERATION}/renders_animated_gs_mesh"
-VIDEO_PATH="${MODEL_PATH}/test/ours_${ITERATION}/${TRANSFORM}_${OCCLUSION}_animation.mp4"
+VIDEO_PATH="${MODEL_PATH}/test/ours_${ITERATION}/${TRANSFORM}_${OCCLUSION_TAG}_animation.mp4"
 
-echo "Animation rendering completed!"
-echo "Results saved to: ${RENDER_DIR}"
+# ======= Sanity checks ======
+if [ ! -d "$MODEL_PATH" ]; then
+    echo "Model path not found: $MODEL_PATH"
+    exit 1
+fi
+
+if [ ! -f "${MODEL_PATH}/point_cloud/iteration_${ITERATION}/model_params.pt" ]; then
+    echo "Checkpoint not found: ${MODEL_PATH}/point_cloud/iteration_${ITERATION}/model_params.pt"
+    exit 1
+fi
+
+if [ ! -f "$MESH_FILE" ]; then
+    echo "Mesh file not found: $MESH_FILE"
+    exit 1
+fi
+
+if [ ! -f "$POLICY_CACHED" ]; then
+    echo "Policy cache not found: $POLICY_CACHED"
+    exit 1
+fi
+
+# ======= Run Animation ======
+CMD=(
+    python render_mesh_splat_animated.py
+    -m "$MODEL_PATH"
+    -s "$DATASET_DIR"
+    --gs_type gs_mesh
+    --total_splats "$BUDGET"
+    --alloc_policy "$POLICY"
+    --texture_obj_path "$MESH_FILE"
+    --mesh_type "$MESH_TYPE"
+    --policy_path "$POLICY_CACHED"
+    --transform "$TRANSFORM"
+    --iteration "$ITERATION"
+)
+
+if [ "$USE_OCCLUSION" = true ]; then
+    CMD+=(--occlusion)
+fi
+
+if [ "$SKIP_TRAIN" = true ]; then
+    CMD+=(--skip_train)
+fi
+
+if [ "$IS_WHITE_BG" = true ]; then
+    CMD+=(--white_background)
+fi
+
+if [ -n "$RESOLUTION_FACTOR" ]; then
+    CMD+=(--resolution "$RESOLUTION_FACTOR")
+fi
+
+echo "Running animation render:"
+printf ' %q' "${CMD[@]}"
+echo
+
+mkdir -p "$(dirname "$LOG_PATH")"
+"${CMD[@]}" 2>&1 | tee "$LOG_PATH"
+
+echo "Animation rendering completed."
+echo "Frame output directory: ${RENDER_DIR}"
 
 if [ -d "$RENDER_DIR" ]; then
     echo "Combining frames into video..."
-    # -y: overwrite output
-    # -framerate 30: 30 fps
-    # -i .../%05d.png: input pattern for 00000.png, 00001.png, etc.
-    # -c:v libx264: H.264 codec
-    # -pix_fmt yuv420p: pixel format for compatibility
-    ffmpeg -y -framerate 30 -i "${RENDER_DIR}/%05d.png" -c:v libx264 -pix_fmt yuv420p "$VIDEO_PATH"
+    ffmpeg -y -framerate "$FPS" -i "${RENDER_DIR}/%05d.png" -c:v libx264 -pix_fmt yuv420p "$VIDEO_PATH"
     echo "Video saved to: $VIDEO_PATH"
 else
-    echo "Render directory not found:# filepath: /mnt/data1/samk/NEU/mesh-splat/run_animation.sh"
+    echo "Render directory not found: $RENDER_DIR"
+    exit 1
 fi
