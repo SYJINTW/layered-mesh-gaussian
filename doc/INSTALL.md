@@ -1,5 +1,18 @@
 # Guide for Environment Setup
 
+## 0. Clone the Repository (Recursive)
+
+```bash
+git clone --recursive https://github.com/SYJINTW/layered-mesh-gaussian.git
+cd layered-mesh-gaussian
+```
+
+If you already cloned without submodules, run:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## 1. Create the Conda Environment
 
 ```bash
@@ -63,6 +76,7 @@ pip install ./submodules/simple-knn
 ## 5. Install and Build External Libraries
 
 ### PyTorch3D
+
 ```
 mkdir ext
 cd ext
@@ -72,6 +86,7 @@ pip install -e .
 ```
 
 ### Nvdiffrast
+
 ```
 cd ext
 git clone https://github.com/NVlabs/nvdiffrast.git
