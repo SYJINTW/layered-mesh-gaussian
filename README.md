@@ -3,15 +3,16 @@
 Official implementation for the paper "LMG: Efficient Streaming of Layered Mesh–Gaussian 3D Scenes"
 
 > **LMG: Efficient Streaming of Layered Mesh–Gaussian 3D Scenes**<br>
-[Yuan-Chun Sun](https://syjintw.github.io/) <sup>1</sup>,
-[Guodong Chen](#) <sup>2</sup>,
-[Sam Ziaie Kondori](#) <sup>1</sup>,
-[Mallesham Dasari](#) <sup>2</sup>,
-[Cheng-Hsin Hsu](https://aiins.cs.nthu.edu.tw/cheng-hsin-hsu/) <sup>1</sup> <br>
- <sup>1</sup> National Tsing Hua University, <sup>2</sup> Northeastern University<br>
-**Accepted by ACM Multimedia Systems Conference 2026 (MMSys'25)** <br>
+> [Yuan-Chun Sun](https://syjintw.github.io/) <sup>1</sup>,
+> [Guodong Chen](#) <sup>2</sup>,
+> [Sam Ziaie Kondori](#) <sup>1</sup>,
+> [Mallesham Dasari](#) <sup>2</sup>,
+> [Cheng-Hsin Hsu](https://aiins.cs.nthu.edu.tw/cheng-hsin-hsu/) <sup>1</sup> <br>
+> <sup>1</sup> National Tsing Hua University, <sup>2</sup> Northeastern University<br>
+> **Accepted by ACM Multimedia Systems Conference 2026 (MMSys'25)** <br>
 
-| [Project](https://aiins-nthu.github.io/LMG/) | [Paper (Coming Soon)](#) |
+| [Project](https://aiins-nthu.github.io/LMG/) | [Paper](https://doi.org/10.1145/3793853.3795764) |
+
 ## Introduction
 
 Layered Mesh-Gaussian (LMG) is a research implementation built upon the official ["GaMeS: Mesh-Based Adapting and Modification of Gaussian Splatting"](https://arxiv.org/abs/2402.01459).  
@@ -45,45 +46,48 @@ The pipeline generates artifacts in the `./output` and `./log` directories. Belo
 
 The trained model files are saved as `.ply` files.
 
-* **Path Template:**
+- **Path Template:**
+
 ```text
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/point_cloud/iteration_{ITER}/point_cloud.ply
 ```
 
-* **Example (`exp_sample.sh`):**
+- **Example (`exp_sample.sh`):**
+
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/point_cloud/iteration_15000/point_cloud.ply
 ```
-
 
 #### 2. Rendered Images
 
 The rendered images from the LMG model for specific iterations.
 
-* **Path Template:**
+- **Path Template:**
+
 ```text
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/test/ours_{ITER}/renders_gs_mesh
 ```
 
+- **Example (`exp_sample.sh`):**
 
-* **Example (`exp_sample.sh`):**
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/test/ours_7000/renders_gs_mesh
 ./output/sample_exp/hotdog/distortion_40000_occlusion/test/ours_15000/renders_gs_mesh
 ```
 
-
 #### 3. Quantitative Metrics
 
 Visual quality metrics are saved as JSON files containing per-view and aggregated results.
 
-* **Path Template:**
+- **Path Template:**
+
 ```text
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/per_view_gs_mesh.json
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/results_gs_mesh.json
 ```
 
-* **Example (`exp_sample.sh`):**
+- **Example (`exp_sample.sh`):**
+
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/per_view_gs_mesh.json
 ./output/sample_exp/hotdog/distortion_40000_occlusion/results_gs_mesh.json
@@ -93,17 +97,20 @@ Visual quality metrics are saved as JSON files containing per-view and aggregate
 
 Execution logs for the pipeline are stored in the separate log directory.
 
-* **Path Template:**
+- **Path Template:**
+
 ```text
 ./log/{EXP_NAME}/{SCENE_NAME}/log_pipeline_{CONFIG}.log
 ```
 
-* **Example (`exp_sample.sh`):**
+- **Example (`exp_sample.sh`):**
+
 ```text
 ./log/sample_exp/hotdog/log_pipeline_distortion_40000_occlusion.log
 ```
 
 # ==== NOT YET ====
+
 ## Quick Start: Full Pipeline with Debug Script
 
 For a complete pipeline (warmup → training → rendering → metrics) with a specific scene, policy, and budget:
