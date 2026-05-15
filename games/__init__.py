@@ -35,7 +35,7 @@ optimizationParamTypeCallbacks = {
 gaussianModel = {
     "gs": GaussianModel,
     "gs_flat": FlatGaussianModel,
-    "gs_mesh": GaussianMeshModel,
+    "gs_mesh": GaussianMeshModel, #! [YC] LMG
     "gs_multi_mesh": GaussianMultiMeshModel,
     "gs_flame": GaussianFlameModel,
     "gs_points": PointsGaussianModel
@@ -44,7 +44,7 @@ gaussianModel = {
 gaussianModelRender = {
     "gs": GaussianModel,
     "gs_flat": FlatGaussianModel,
-    "gs_mesh": GaussianMeshModel,
+    "gs_mesh": GaussianMeshModel, #! [YC] LMG
     "gs_multi_mesh": GaussianMultiMeshModel,
     "gs_flame": GaussianFlameModel,
     "gs_points": PointsGaussianModel

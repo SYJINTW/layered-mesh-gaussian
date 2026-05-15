@@ -38,6 +38,7 @@ class Scene:
                 texture_obj_path : str = None, # legacy - use textured_mesh parameter instead
                 policy_path : str = None,
                 textured_mesh = None,
+                preload_gs_path : str = None, # path to pretrained gs model (ply file) to load at the beginning of training, for warm starting
                 # <<<< [YC] add
                 ):
         """b
@@ -59,58 +60,59 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
-
         # ---------------------------------------------------------------------------- #
         #               Call dataset reader according to dataset type                  # 
         # ---------------------------------------------------------------------------- #
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            if args.gs_type == "gs_multi_mesh":
-                scene_info = sceneLoadTypeCallbacks["Colmap_Mesh"](
-                    args.source_path, args.images, args.eval, args.num_splats, args.meshes
-                )
-            # [YC] add gs_mesh type single colmap mesh
-            # Real world scene (indoor/outdoor) uses this loader
-            elif args.gs_type == "gs_mesh":
-                scene_info = sceneLoadTypeCallbacks["Colmap_Single_Mesh"](
-                    args.source_path, args.images, args.eval, args.num_splats[0], 
-                    texture_obj_path=texture_obj_path,
-                    policy_path=policy_path,
-                    total_splats=args.total_splats,
-                    budget_per_tri=args.budget_per_tri,
-                    budgeting_policy_name=args.alloc_policy,
-                    mesh_type=args.mesh_type,
-                    textured_mesh = textured_mesh,
-                )
-            else:
-                scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
-        
+            # if args.gs_type == "gs_multi_mesh":
+            #     scene_info = sceneLoadTypeCallbacks["Colmap_Mesh"](
+            #         args.source_path, args.images, args.eval, args.num_splats, args.meshes
+            #     )
+            # # [YC] add gs_mesh type single colmap mesh
+            # # Real world scene (indoor/outdoor) uses this loader
+            # elif args.gs_type == "gs_mesh":
+            #     scene_info = sceneLoadTypeCallbacks["Colmap_Single_Mesh"](
+            #         args.source_path, args.images, args.eval, args.num_splats[0], 
+            #         texture_obj_path=texture_obj_path,
+            #         policy_path=policy_path,
+            #         total_splats=args.total_splats,
+            #         budget_per_tri=args.budget_per_tri,
+            #         budgeting_policy_name=args.alloc_policy,
+            #         mesh_type=args.mesh_type,
+            #         textured_mesh = textured_mesh,
+            #     )
+            # else:
+            #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
+            pass
+        #! [YC] XXX
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
-            
+            #! [YC] XXX
             if args.gs_type == "gs_mesh": #! [YC] need to be aware of gs_type
-                
-                print("Found transforms_train.json file, assuming Blender_Mesh dataset!")
-                
+                print("[INFO] Found transforms_train.json file, assuming Blender_Mesh dataset!")
                 # Synthetic scene uses this loader
+                # [NOTE] This step load the texture mesh and compute the budgeting policy
                 scene_info = sceneLoadTypeCallbacks["Blender_Mesh"](
-                    args.source_path, args.white_background, args.eval, args.num_splats[0],
-                    # >>>> [YC] add
+                    path=args.source_path, 
+                    white_background=args.white_background,
+                    eval=args.eval,
+                    num_splats=args.num_splats[0],
                     texture_obj_path=texture_obj_path,
                     policy_path=policy_path,
-                    # <<<< [YC] add
-                    # >>>> [Sam] add
                     total_splats=args.total_splats,
                     budget_per_tri=args.budget_per_tri,
                     budgeting_policy_name=args.alloc_policy,
                     mesh_type=args.mesh_type,
                     textured_mesh = textured_mesh,
-                    # <<<< [Sam] add
+                    preload_gs_path = preload_gs_path
                 )
             elif args.gs_type == "gs_flame":
-                print("Found transforms_train.json file, assuming Flame Blender data set!")
-                scene_info = sceneLoadTypeCallbacks["Blender_FLAME"](args.source_path, args.white_background, args.eval)
+                # print("Found transforms_train.json file, assuming Flame Blender data set!")
+                # scene_info = sceneLoadTypeCallbacks["Blender_FLAME"](args.source_path, args.white_background, args.eval)
+                pass
             else:
-                print("Found transforms_train.json file, assuming Blender data set!")
-                scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+                # print("Found transforms_train.json file, assuming Blender data set!")
+                # scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+                pass
         else:
             assert False, "Could not recognize scene type!"
             
@@ -119,7 +121,6 @@ class Scene:
         # save a copy of allocation result into output dir
         
         num_tri = scene_info.point_cloud.triangles.shape[0] if hasattr(scene_info.point_cloud, 'triangles') else 0
-        
         
         assert (args.budget_per_tri is not None) or (args.total_splats is not None), "Either num_splats or total_splats must be provided for budgeting!"
         
@@ -140,8 +141,6 @@ class Scene:
                 dest_file.write(src_file.read())
         else:    
             print(f"[WARNING] Didn't find computed budgeting policy file at {computed_policy_path}, skipping copy.")
-        
-        
         
         # ====== Load Cameras and PLY files ======
         if not self.loaded_iter:
@@ -176,7 +175,6 @@ class Scene:
             with open(os.path.join(self.model_path, "test_cameras.json"), 'w') as file:
                 json.dump(json_test_cams, file)
             
-                
         # if shuffle:
         #     print("shuffle") # [YC] debug
         #     random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
@@ -193,11 +191,11 @@ class Scene:
 
         # [YC] [NOTE] Load trained GS scene (ply file) for rendering
         if self.loaded_iter:
+            print(f"[DEBUG] Scene:: loaded gs model from iteration {self.loaded_iter}")
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
-            print(f"[INFO] Scene:: loaded gs model from iteration {self.loaded_iter}")
             self.gaussians.point_cloud = scene_info.point_cloud
             if args.gs_type == "gs_mesh": #! [YC] need to be aware of gs_type
                 self.gaussians.triangles = scene_info.point_cloud.triangles
@@ -208,6 +206,7 @@ class Scene:
             # [YC] note: if using "gs_mesh", the create_from_pcd() 
             # will use the one defined in mesh-splat/games/scene/gaussian_model_mesh.py
             # under class GaussianMeshModel(GaussianModel)
+            print(f"[DEBUG] Scene:: creating gs model from pcd for the first time")
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
     def save(self, iteration):

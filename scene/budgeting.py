@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from collections import deque
+import datetime
 from typing import Dict, Optional, Tuple 
 from types import SimpleNamespace
 from functools import partial
+from click import Path
 from tqdm import tqdm
 
 import numpy as np
@@ -12,6 +14,8 @@ from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesVertex
 from pytorch3d.io import load_objs_as_meshes
 from renderer.mesh_renderer.mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
+from renderer.mesh_renderer.mesh_renderer_nvdiffrast import mesh_renderer_nvdiffrast # For rendering mesh
+import renderer.mesh_splat_renderer as mesh_splat_renderer # For rendering LMG
 import cv2
 import os 
 import matplotlib.cm as cm
@@ -22,7 +26,7 @@ from utils.camera_utils import cameraList_from_camInfos
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
-
+import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
 
 EPS = 1e-8 # small positive epsilon to avoid divide-by-zero
 
@@ -80,7 +84,6 @@ class BudgetingPolicy(ABC):
         pass
 
 
-
 def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
     
     REGISTRY: Dict[str, type] = {
@@ -102,8 +105,7 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "texture_focus": None,
         "texture_avoid": None,
         
-        
-        "distortion": DistortionMapBudgetingPolicy,
+        "distortion": DistortionMapBudgetingPolicy, #! [XXX]
         "distortion_no_avg": partial(DistortionMapBudgetingPolicy, is_averaging_across_views=False),
         
         "mixed": partial(MixedBudgetingPolicy), # not yet implemented
@@ -122,7 +124,6 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         return policy_class(mesh=mesh, **kwargs)
     except KeyError:
         raise ValueError(f"Unknown budgeting policy: '{name}'")
-
 
 
 # [NOTE] we use unbounded version as default allocate() method
@@ -275,8 +276,6 @@ def _unbounded_proportional_allocate(
     print(f"[DEBUG] Normalized weights (sum={norm_weights.sum():.4f}) - min: {norm_weights.min():.6f}, max: {norm_weights.max():.6f}")
     
 
-
-
     # "Largest Remainder Method"
     alloc =  np.zeros((N,), dtype=np.int32)
     
@@ -318,8 +317,6 @@ def _unbounded_proportional_allocate(
     assert np.all(alloc >= 0), "Error: Allocation contains negative values"
     assert alloc.sum() == total, f"Error: Final allocation sum {alloc.sum()} does not match total budget {total}"
     return alloc
-
-
 
 
 # [TODO] [DOING] implement this
@@ -485,8 +482,6 @@ class UniformBudgetingPolicy(BudgetingPolicy):
     #     return np.full((num_triangles,), uniform_alloc, dtype=np.int32)
 
 
-
-
 class RandomUniformBudgetingPolicy(BudgetingPolicy):
     """
     Allocates points to triangles based on weights randomly sampled from Uniform(0,1).
@@ -495,7 +490,6 @@ class RandomUniformBudgetingPolicy(BudgetingPolicy):
         super().__init__(mesh, **kwargs)
         weights = np.random.rand(self.num_triangles).astype(np.float32)
         self.weights = np.clip(weights, EPS, 1.0) # make sure weights are positive
-
 
 
 class RandomNormalBudgetingPolicy(BudgetingPolicy):
@@ -509,9 +503,6 @@ class RandomNormalBudgetingPolicy(BudgetingPolicy):
         sigma = 0.15 # adjustable parameter
         w = np.random.normal(loc=mu, scale=sigma, size=self.num_triangles).astype(np.float32)
         self.weights = np.clip(w, EPS, 1.0) # make sure weights are positive
-
-    
-
 
 
 class PlanarityBasedBudgetingPolicy(BudgetingPolicy):
@@ -717,8 +708,6 @@ class PlanarityBasedBudgetingPolicy(BudgetingPolicy):
         return mrl
 
 
-
-
 #[FIXED] the policy was not correctly loaded during render_mesh_splat
 class DistortionMapBudgetingPolicy(BudgetingPolicy):
     """
@@ -734,7 +723,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
     def __init__(
         self, 
         mesh: trimesh.Trimesh,
-        viewpoint_camera_infos=None,  # pass in CamInfo, get Camera later
+        viewpoint_camera_infos=None, # pass in CamInfo, get Camera later
         dataset_path: str = None,
         faces_per_pixel: int = 1,
         device: str = "cuda",
@@ -756,7 +745,6 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         else: 
             print(f"[INFO] DistortionMapBudgeter:: Not averaging distortion across views")
         
-
         assert self.viewpoint_camera_infos is not None and len(self.viewpoint_camera_infos) != 0, "DistorsionMapPolicy::Missing CamInfos"
 
         # Build Camera objects
@@ -779,6 +767,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
             print("[WARNING] DistortionMapBudgetingPolicy: No valid distortion weights, falling back to uniform")
             # Fallback to uniform is handled by base class __init__
 
+    
     def _load_or_create_mesh(self) -> Tuple[Meshes, torch.Tensor, torch.Tensor]:  # Use Tuple instead of tuple
         """
         Helper method to load textured mesh or create from trimesh.
@@ -825,6 +814,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         
         return p3d_mesh, verts, faces
 
+    
     # [DONE] check the heatmap point cloud against the mesh, the coordinates should align
     def _compute_distortion_weights(self) -> np.ndarray:
         """
@@ -848,6 +838,9 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         num_faces = faces.shape[0]
         dist_map_all = torch.zeros(num_faces, dtype=torch.float32, device=self.device)
         per_view_debug = [] if self.debugging else None
+        
+        # [XXX] Load textured mesh for nvdiffrast rendering
+        nv_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(None, "/mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply")
         
         
         # [TODO] this is not really batch processing, it's still sequential
@@ -889,32 +882,68 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                 # Get ground truth image - already [C, H, W] on GPU
                 gt_img = viewpoint_camera.original_image  # [C, H, W]
                 
-                # Render textured mesh
-                p3d_mesh_color_rgb, _, _ = mesh_renderer_pytorch3d(
-                    viewpoint_camera, p3d_mesh,
-                    image_height=cam_height,
-                    image_width=cam_width,
-                    faces_per_pixel=self.faces_per_pixel,
-                    device=self.device
-                )
-                # the rendering function doesn't support batching yet
+                # # Render textured mesh
+                # p3d_mesh_color_rgb, _, _ = mesh_renderer_pytorch3d(
+                #     viewpoint_camera, p3d_mesh,
+                #     image_height=cam_height,
+                #     image_width=cam_width,
+                #     faces_per_pixel=self.faces_per_pixel,
+                #     device=self.device
+                # )
                 
-                p3d_mesh_color_rgb = torch.clamp(p3d_mesh_color_rgb, 0.0, 1.0)
+                # # the rendering function doesn't support batching yet
+                # p3d_mesh_color_rgb = torch.clamp(p3d_mesh_color_rgb, 0.0, 1.0)
                 
+                # # Compute per-pixel absolute difference - [C, H, W] format
+                # dist_map = torch.mean(torch.abs(gt_img - p3d_mesh_color_rgb), dim=0)  # [H, W]
+                
+                # # Render face indices
+                # _, _, tm2p3d_fragments = mesh_renderer_pytorch3d(
+                #     viewpoint_camera, tm2p3d_mesh,
+                #     image_height=cam_height,
+                #     image_width=cam_width,
+                #     faces_per_pixel=self.faces_per_pixel,
+                #     device=self.device
+                # )
+                
+                # # Pixel-to-face mapping
+                # face_idx_map = tm2p3d_fragments.pix_to_face[0, ..., 0]  # [H, W]
+                
+                # >>>> [XXX] 
+                # Render face indices - nvdiffrast version
+                # Render RGB images
+                # mesh_color_rgb, _, _ = mesh_renderer_nvdiffrast(
+                #     viewpoint_camera, nv_mesh,
+                #     image_height=cam_height,
+                #     image_width=cam_width,
+                #     device=self.device
+                # )
+                # print("[DEBUG] Rendered RGB shape (nvdiffrast):", mesh_color_rgb.shape)
+                render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
+                                pc=None, pipe=None, 
+                                bg_color=None, bg_depth=None, 
+                                textured_mesh=nv_mesh,
+                                mesh_background_color=(1.0, 1.0, 1.0),
+                                mesh_rasterizer_type="nvdiffrast"
+                                )
+                mesh_color_rgb = render_pkg["render"]
+                fragments = render_pkg["fragments"]
+                # print("[DEBUG] Rendered RGB shape (rasterizer):", mesh_color_rgb.shape)
+                
+                mesh_color_rgb = torch.clamp(mesh_color_rgb, 0.0, 1.0)
                 # Compute per-pixel absolute difference - [C, H, W] format
-                dist_map = torch.mean(torch.abs(gt_img - p3d_mesh_color_rgb), dim=0)  # [H, W]
+                dist_map = torch.mean(torch.abs(gt_img - mesh_color_rgb), dim=0)  # [H, W]
                 
-                # Render face indices
-                _, _, tm2p3d_fragments = mesh_renderer_pytorch3d(
-                    viewpoint_camera, tm2p3d_mesh,
-                    image_height=cam_height,
-                    image_width=cam_width,
-                    faces_per_pixel=self.faces_per_pixel,
-                    device=self.device
-                )
-                
+                # # Get pixel to face idx
+                # _, _, fragments = mesh_renderer_nvdiffrast(
+                #     viewpoint_camera, nv_mesh,
+                #     image_height=cam_height,
+                #     image_width=cam_width,
+                #     device=self.device
+                # )
                 # Pixel-to-face mapping
-                face_idx_map = tm2p3d_fragments.pix_to_face[0, ..., 0]  # [H, W]
+                face_idx_map = fragments.pix_to_face[0, ..., 0]  # [H, W]
+                # <<<< [XXX]
                 
                 # Flatten and filter
                 face_idx_flat = face_idx_map.flatten()
@@ -930,24 +959,29 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                 mean_dist = torch.zeros(num_faces, dtype=torch.float32, device=self.device)
                 mask = count > 0
                 
-                
                 # [TODO] try both sum and mean strategies
                 if self.is_averaging_across_views:
-                    
                     mean_dist[mask] = sum_dist[mask] / count[mask]
                 else:
                     mean_dist[mask] = sum_dist[mask]
                     
-                
                 # Accumulate distortion
                 dist_map_all += mean_dist
                 
-                # Debug info
+                # # Debug info
+                # if per_view_debug is not None:
+                #     per_view_debug.append({
+                #         "index": idx,
+                #         "image_name": getattr(viewpoint_camera, "image_name", f"view_{idx}"),
+                #         "p3d_mesh_color": p3d_mesh_color_rgb.cpu(),
+                #         "gt": gt_img.cpu(),
+                #         "dist_map": dist_map.cpu().numpy(),
+                #     })
                 if per_view_debug is not None:
                     per_view_debug.append({
                         "index": idx,
                         "image_name": getattr(viewpoint_camera, "image_name", f"view_{idx}"),
-                        "p3d_mesh_color": p3d_mesh_color_rgb.cpu(),
+                        "p3d_mesh_color": mesh_color_rgb.cpu(),
                         "gt": gt_img.cpu(),
                         "dist_map": dist_map.cpu().numpy(),
                     })
@@ -982,19 +1016,25 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         
         return np.maximum(dist_norm, EPS).astype(np.float32)
 
+    
     def _save_debug_visualization(self, dist_map_all: np.ndarray, per_view_debug=None):
         """Save distortion map debug artifacts: per-view renders, heatmaps, and colored point cloud."""
+        print(f"[DEBUG] Saving debug visualization...")
         try:
             import matplotlib.cm as cm
             import matplotlib.pyplot as plt
             import open3d as o3d
+            from pathlib import Path
+            from datetime import datetime
 
-            base_dir = "./distortion_debug_visualization"
-            heatmap_dir = os.path.join(base_dir, "heatmap")
-            mesh_bg_dir = os.path.join(base_dir, "mesh_bg")
-            os.makedirs(heatmap_dir, exist_ok=True)
-            os.makedirs(mesh_bg_dir, exist_ok=True)
-
+            # 產生格式化時間，例如：20260515_162012
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_dir = Path(".")/ "distortion_debug_visualization" / f"{run_id}"
+            heatmap_dir = base_dir / "heatmap"
+            heatmap_dir.mkdir(parents=True, exist_ok=True)
+            mesh_bg_dir = base_dir / "bg"
+            mesh_bg_dir.mkdir(parents=True, exist_ok=True)
+            
             # 1) Per-view artifacts
             if per_view_debug is not None:
                 for item in per_view_debug:
@@ -1004,7 +1044,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                     # Save rendered mesh background
                     try:
                         p3d_mesh_color_pil = TF.to_pil_image(p3d_mesh_color.cpu())
-                        p3d_mesh_color_pil.save(os.path.join(mesh_bg_dir, f"{name}.png"))
+                        p3d_mesh_color_pil.save(str(mesh_bg_dir / f"{name}.png"))
                     except Exception as e:
                         print(f"[WARNING] Could not save render for {name}: {e} (got {getattr(item['render'], 'shape', None)})")
                         pass
@@ -1017,7 +1057,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                         plt.imshow(dm_norm, cmap='hot', vmin=0.0, vmax=1.0)
                         plt.axis('off')
                         plt.tight_layout(pad=0)
-                        plt.savefig(os.path.join(heatmap_dir, f"{name}.png"), dpi=200, bbox_inches='tight', pad_inches=0)
+                        plt.savefig(str(heatmap_dir/f"{name}.png"), dpi=200, bbox_inches='tight', pad_inches=0)
                         plt.close()
                     except Exception as e:
                         print(f"[WARNING] Could not save heatmap for {name}: {e}")
@@ -1040,15 +1080,10 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
             pcd.colors = o3d.utility.Vector3dVector(vertex_colors)
 
             # Save as PLY
-            output_path = os.path.join(base_dir, "distortion_heatmap.ply")
-            o3d.io.write_point_cloud(output_path, pcd)
+            output_path = base_dir / "distortion_heatmap.ply"
+            o3d.io.write_point_cloud(str(output_path), pcd)
             print(f"[INFO] Saved distortion debug to {base_dir}")
         except Exception as e:
             print(f"[WARNING] Could not save debug visualization: {e}")
-
-
-
-
-
 
 

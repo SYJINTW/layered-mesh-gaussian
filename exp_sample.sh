@@ -12,13 +12,13 @@ export CUDA_VISIBLE_DEVICES=0
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(40000)
+BUDGETS=(2000)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion")
 POLICIES=("distortion")
 
 # "--occlusion" or ""
-WHETHER_OCCLUSION=("--occlusion" ) 
+WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
 PROJECT_GLOBAL_PATH="/mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian" #! Change to your project path

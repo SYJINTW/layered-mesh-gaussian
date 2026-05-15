@@ -84,7 +84,10 @@ def warmup(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, c
     print("[DEBUG] going into Scene initialization...")
     
     # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    scene = Scene(dataset, gaussians, policy_path=policy_path, texture_obj_path=texture_obj_path, textured_mesh=textured_mesh)
+    scene = Scene(dataset, gaussians, 
+                policy_path=policy_path, 
+                texture_obj_path=texture_obj_path, 
+                textured_mesh=textured_mesh)
     gaussians.training_setup(opt)
     
     # [TODO] Tricky part, but it is correct
@@ -345,3 +348,4 @@ if __name__ == "__main__":
 
     # All done
     print("\n[INFO] Warmup complete.")
+

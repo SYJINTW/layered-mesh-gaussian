@@ -2,6 +2,7 @@ import torch
 import math
 import nvdiffrast.torch as dr
 import numpy as np
+from types import SimpleNamespace # 用來仿造 PyTorch3D 的 fragments 物件
 
 def fov2focal(fov, pixels):
     return pixels / (2 * math.tan(fov / 2))
@@ -90,6 +91,16 @@ def mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
     bg_depth = w_clip.masked_fill(bg_mask, -1.0)
     bg_depth = bg_depth.unsqueeze(0)  # [1,H,W]
     
-    # return bg_color, bg_depth, fragments
-    return bg_color, bg_depth, None
+    # nvdiffrast is 1-based but we want to change to 0-based (-1 means no face hit)
+    pix_to_face = rast_out[..., 3].long() - 1  # Shape: (1, H, W)
+    # Change the format same as pytorch3d (1, H, W, 1)
+    pix_to_face = pix_to_face.unsqueeze(-1)    # Shape: (1, H, W, 1)
+    zbuf = bg_depth.unsqueeze(0).unsqueeze(-1) # Shape: (1, H, W, 1)
+    
+    fragments = SimpleNamespace(
+        pix_to_face=pix_to_face,
+        zbuf=zbuf
+    )
+    
+    return bg_color, bg_depth, fragments
     

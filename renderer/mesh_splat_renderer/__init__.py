@@ -35,20 +35,21 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
     
     Background tensor (bg_color) must be on GPU!
     """
-    
+    # ------------------------- Render texture mesh part ------------------------- #
     # print(f"[DEBUG][DEBUG] bg_color: {bg_color}")
     # Using textured mesh for color
     if bg_color is not None and bg_depth is not None:
+        fragments = None
         pass  # Both bg_color and bg_depth are provided, no need to render textured mesh
     elif bg_color is None and bg_depth is not None and textured_mesh is not None:
         if mesh_rasterizer_type == "pytorch3d":
-            bg_color, _, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+            bg_color, _, fragments = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
                                                     image_height=viewpoint_camera.image_height,
                                                     image_width=viewpoint_camera.image_width,
                                                     background_color=mesh_background_color
                                                     )
         elif mesh_rasterizer_type == "nvdiffrast":
-            bg_color, _, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+            bg_color, _, fragments = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
                                                     image_height=viewpoint_camera.image_height,
                                                     image_width=viewpoint_camera.image_width,
                                                     background_color=mesh_background_color
@@ -56,13 +57,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
     # Using textured mesh for depth
     elif bg_color is not None and bg_depth is None and textured_mesh is not None:
         if mesh_rasterizer_type == "pytorch3d":
-            _, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+            _, bg_depth, fragments = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
                                                 image_height=viewpoint_camera.image_height,
                                                 image_width=viewpoint_camera.image_width,
                                                 background_color=mesh_background_color
                                                 )
         elif mesh_rasterizer_type == "nvdiffrast":
-            _, bg_depth, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+            _, bg_depth, fragments = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
                                                     image_height=viewpoint_camera.image_height,
                                                     image_width=viewpoint_camera.image_width,
                                                     background_color=mesh_background_color
@@ -70,20 +71,32 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
     # Using textured mesh for both color and depth
     elif bg_color is None and bg_depth is None and textured_mesh is not None:
         if mesh_rasterizer_type == "pytorch3d":
-            bg_color, bg_depth, _ = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
+            bg_color, bg_depth, fragments = mesh_renderer_pytorch3d(viewpoint_camera, textured_mesh,
                                                     image_height=viewpoint_camera.image_height,
                                                     image_width=viewpoint_camera.image_width,
                                                     background_color=mesh_background_color
                                                     )
         elif mesh_rasterizer_type == "nvdiffrast":
-            bg_color, bg_depth, _ = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
+            bg_color, bg_depth, fragments = mesh_renderer_nvdiffrast(viewpoint_camera, textured_mesh,
                                                     image_height=viewpoint_camera.image_height,
                                                     image_width=viewpoint_camera.image_width,
                                                     background_color=mesh_background_color
                                                     )
     else:
         raise ValueError("At least one of bg_color, bg_depth, or textured_mesh must be provided.")
-               
+    
+    if pc is None:
+        return {
+                "render": bg_color,
+                "viewspace_points": None,
+                "visibility_filter" : None,
+                "radii": None,    
+                "bg_color": bg_color, 
+                "bg_depth": bg_depth,
+                "fragments": fragments
+                }           
+    
+    # --------------------------- Render Gaussians part -------------------------- #
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -108,7 +121,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipe.debug,
-        depth=bg_depth # [YC]
+        depth=bg_depth
         # antialiasing=pipe.antialiasing
     )
 
@@ -160,11 +173,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe,
     
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
+    return {
+            "render": rendered_image,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
             "radii": radii,
             "bg_color": bg_color, # [YC] add
-            "bg_depth": bg_depth
-            # "depth": depth_image
+            "bg_depth": bg_depth,
+            "fragments": fragments
             }

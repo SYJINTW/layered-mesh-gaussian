@@ -16,7 +16,8 @@ from scene.dataset_readers import (
     readNerfSyntheticInfo,
 )
 from games.mesh_splatting.scene.dataset_readers import (
-    readNerfSyntheticMeshInfo
+    readNerfSyntheticMeshInfo,
+    readNerfSyntheticMeshGSInfo
 )
 from games.multi_mesh_splatting.scene.dataset_readers import (
     readColmapMeshSceneInfo,
@@ -32,6 +33,7 @@ sceneLoadTypeCallbacks = {
     "Colmap_Mesh": readColmapMeshSceneInfo,
     "Colmap_Single_Mesh": readColmapSingleMeshSceneInfo, # [YC] add
     "Blender": readNerfSyntheticInfo, 
-    "Blender_Mesh": readNerfSyntheticMeshInfo, # [YC] add
+    "Blender_Mesh": readNerfSyntheticMeshInfo, #! [YC] LMG
+    "Blender_Mesh_GS": readNerfSyntheticMeshGSInfo, #! [YC] LMG
     "Blender_FLAME": readNerfSyntheticFlameInfo
 }

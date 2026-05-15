@@ -206,7 +206,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                                 textured_mesh=textured_mesh,
                                 mesh_background_color=background,
                                 mesh_rasterizer_type=mesh_rasterizer_type)["render"] # [YC] using different rasterizer
-                print("\033[92m [INFO] Render::DTGS using Depth+Texture+GS rasterizer for gs_mesh\033[0m")
+                # print("\033[92m [INFO] Render::DTGS using Depth+Texture+GS rasterizer for gs_mesh\033[0m")
                 
             else: 
                 pure_bg_depth = torch.full((1, view.image_height, view.image_width), 0, dtype=torch.float32, device="cuda")
@@ -215,7 +215,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                                 textured_mesh=textured_mesh,
                                 mesh_background_color=background,
                                 mesh_rasterizer_type=mesh_rasterizer_type)["render"] # [YC] no occlusion handling, always use pure bg and pure depth
-                print("\033[96m [INFO] Render::TGS using Texture+GS rasterizer for gs_mesh\033[0m")
+                # print("\033[96m [INFO] Render::TGS using Texture+GS rasterizer for gs_mesh\033[0m")
             
             # >>>> [YC] add for debug images
             if debug_flag:
@@ -239,7 +239,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
             torchvision.utils.save_image(gt, os.path.join(debug_path, '{0:05d}_gt'.format(idx) + ".png"))
         # <<<< [YC] add for debug images
         
-        break
+        # break
         
 # sets are {train,test, (val)}
 def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,
@@ -390,17 +390,61 @@ if __name__ == "__main__":
                 )
     
 """
-python render_mesh_splat.py \
--m output/sample_exp/hotdog/distortion_100_occlusion \
+python render_mesh_splat_dynamic.py \
+-m ./output/sample_exp/hotdog/distortion_100_occlusion \
 --gs_type gs_mesh \
 --skip_train \
 --occlusion \
 --total_splats 100 \
 --alloc_policy distortion \
---texture_obj_path /mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian/dataset/meshes/hotdog \
---policy_path output/sample_exp/hotdog/distortion_100_occlusion//distortion_100.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
+--iteration 500 \
+--mesh_rasterizer_type nvdiffrast
+
+python render_mesh_splat_dynamic.py \
+-m ./output/sample_exp/hotdog/distortion_100_occlusion \
+--gs_type gs_mesh \
+--skip_train \
+--occlusion \
+--total_splats 100 \
+--alloc_policy distortion \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
+--iteration 1000 \
+--mesh_rasterizer_type nvdiffrast
+"""
+
+"""
+python render_mesh_splat_dynamic.py \
+-m ./output/sample_exp/hotdog/distortion_5000_occlusion \
+--gs_type gs_mesh \
+--skip_train \
+--occlusion \
+--total_splats 5000 \
+--alloc_policy distortion \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--policy_path ./output/sample_exp/hotdog/distortion_5000_occlusion/distortion_5000.npy \
+--iteration 0 \
+--mesh_rasterizer_type nvdiffrast
+
+python render_mesh_splat_dynamic.py \
+-m ./output/sample_exp/hotdog/distortion_5000_occlusion \
+--gs_type gs_mesh \
+--skip_train \
+--occlusion \
+--total_splats 5000 \
+--alloc_policy distortion \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--policy_path ./output/sample_exp/hotdog/distortion_5000_occlusion/distortion_5000.npy \
 --iteration 1000 \
 --mesh_rasterizer_type nvdiffrast
 """
