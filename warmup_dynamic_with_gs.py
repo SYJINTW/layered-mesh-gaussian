@@ -14,6 +14,7 @@ import torch
 from renderer.mesh_splat_renderer import render, network_gui
 import sys
 from scene import Scene
+from scene import SceneSimple
 from games import (
     optimizationParamTypeCallbacks,
     gaussianModel
@@ -42,9 +43,19 @@ from pathlib import Path
 import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
 import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
 
+# >>>> [YC] add
+from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud
+# <<<< [YC] add
+
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
 
+def get_tri_avg_colors(mesh_scene):
+    vertex_colors = mesh_scene.visual.vertex_colors[:, :3]
+    faces = mesh_scene.faces
+    tri_vertex_colors = vertex_colors[faces]  # (n_faces, 3, 3)
+    tri_avg_colors = tri_vertex_colors.mean(axis=1)
+    return tri_avg_colors
 
 def warmup(gs_type, dataset, opt, pipe, 
             testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
@@ -66,33 +77,52 @@ def warmup(gs_type, dataset, opt, pipe,
     gaussians = gaussianModel[gs_type](dataset.sh_degree) # [YC] note: nothing changing here
     print("[INFO] Training() policy_path:", policy_path)
         
-    # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
-    if gs_type == "gs_mesh":
-        # [TODO] Tricky part, but it is correct
-        textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
-        # if mesh_rasterizer_type == "pytorch3d":
-        #     textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
-        # elif mesh_rasterizer_type == "nvdiffrast":
-        #     textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-    else:
-        textured_mesh = None
-    # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.
-    # because, why pass the path when its already loaded right here?
-    # <<<< [YC] add
-    
-    #! [YC] note: main changing point is here
-    
     print("[INFO] Scene initialization...")
     
-    # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    scene = Scene(dataset, gaussians, 
-                policy_path=policy_path, 
-                texture_obj_path=texture_obj_path, 
-                textured_mesh=textured_mesh,
-                preload_gs_path="/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp/hotdog/distortion_5000_occlusion/point_cloud/iteration_0/point_cloud.ply" # [TODO] add option to load pretrained gs model (ply file) for warm starting
-                )
+    # [TODO] Init warmup (without gs_path)
+    scene = SceneSimple(args=dataset, 
+                        gaussians=gaussians, 
+                        texture_obj_path=texture_obj_path, 
+                        gs_path=None
+                        )
+    
+    num_splats_per_triangle = my_get_num_splats_per_triangle(
+            dataset_path=dataset.source_path,
+            mesh_scene=scene.mesh_scene,
+            triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+            viewpoint_camera_infos=scene.train_cam_infos, # [TODO] maybe should feed into other para
+            total_splats=dataset.total_splats,
+            budgeting_policy_name=dataset.alloc_policy,
+            policy_path=policy_path,
+            mesh_type=dataset.mesh_type,
+        )
+       
+    print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
+    print(f"[INFO] Total number of splats allocated: {num_splats_per_triangle.sum()}")
+    
+    tri_avg_colors = get_tri_avg_colors(scene.mesh_scene) 
+    
+    pcd = create_init_point_cloud(
+        model_path=dataset.model_path,
+        triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+        num_splats_per_triangle=num_splats_per_triangle,
+        tri_avg_colors=tri_avg_colors
+    )
+    
+    gaussians.create_from_pcd(pcd, scene.cameras_extent)
+    
+    scene.gaussians = gaussians 
     
     scene.save(0) # save the initialized scene as iteration 0
+    
+    # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
+    gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp/hotdog/distortion_500_occlusion/point_cloud/iteration_0/point_cloud.ply"
+    scene = SceneSimple(args=dataset, 
+                        gaussians=gaussians, 
+                        texture_obj_path=texture_obj_path, 
+                        gs_path=gs_path
+                        )
+    scene.save(-1) # save the initialized scene as iteration 0
     
     # gaussians.training_setup(opt)
     

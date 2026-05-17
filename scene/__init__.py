@@ -23,6 +23,18 @@ from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from pytorch3d.structures import Meshes
 
+# >>>> [YC] add
+import trimesh
+import numpy as np
+import torch
+
+def transform_vertices_function(vertices, c=1):
+    vertices = vertices[:, [0, 2, 1]]
+    vertices[:, 1] = -vertices[:, 1]
+    vertices *= c
+    return vertices
+
+# <<<< [YC] add
 
 class Scene:
 
@@ -218,4 +230,142 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
-    
+
+class SceneSimple(Scene):
+    def __init__(self, 
+                args : ModelParams, 
+                gaussians : GaussianModel, 
+                load_iteration=None, shuffle=True, resolution_scales=[1.0],
+                # >>>> [YC] add
+                texture_obj_path : str = None, # legacy - use textured_mesh parameter instead
+                gs_path : str = None, # path to pretrained gs model (ply file) to load at the beginning of training, for warm starting
+                # <<<< [YC] add
+                ):
+        """b
+        :param path: Path to colmap scene main folder.
+        """
+        self.model_path = args.model_path
+        self.loaded_iter = None
+        
+        # Mesh scene
+        self.mesh_scene = None
+        self.vertices = None
+        self.faces = None
+        self.triangles = None
+        
+        # Gaussian scene
+        self.gaussians = gaussians
+
+        
+        if load_iteration:
+            if load_iteration == -1:
+                self.loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"))
+            else:
+                self.loaded_iter = load_iteration
+            print(f"Loading trained model at iteration {self.loaded_iter}")
+
+        # --------------------- Load training and testing cameras -------------------- #
+        self.train_cameras = {}
+        self.test_cameras = {}
+
+        if os.path.exists(os.path.join(args.source_path, "sparse")):
+            pass
+        #! [YC] XXX
+        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
+            #! [YC] XXX
+            if args.gs_type == "lmg": #! [YC] need to be aware of gs_type
+                print("[INFO] Found transforms_train.json file, assuming Blender_Mesh dataset!")
+                # [NOTE] This step only load cameras
+                scene_info = sceneLoadTypeCallbacks["Blender_Mesh_Simple"](
+                    path=args.source_path, 
+                    white_background=args.white_background,
+                    eval=args.eval,
+                )
+            else:
+                raise NotImplementedError(f"Scene loader for gs_type {args.gs_type} not implemented yet!")
+        else:
+            assert False, "Could not recognize scene type!"
+        
+        self.cameras_extent = scene_info.nerf_normalization["radius"]
+
+        self.train_cam_infos = scene_info.train_cameras
+        self.test_cam_infos = scene_info.test_cameras
+         
+        for resolution_scale in resolution_scales:
+            print("Scene:: Loading Training Cameras from camInfos at scale ", resolution_scale)
+            self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
+            # print(self.train_cameras[resolution_scale][0].uid) # [YC] debug
+            print("Scene:: Loading Test Cameras from camInfos at scale ", resolution_scale)
+            self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
+
+        if not self.loaded_iter:            
+            json_cams = []
+            json_train_cams = []
+            json_test_cams = []
+            camlist = []
+            train_camlist = []
+            if scene_info.test_cameras:
+                camlist.extend(scene_info.test_cameras)
+            if scene_info.train_cameras:
+                camlist.extend(scene_info.train_cameras)
+                train_camlist.extend(scene_info.train_cameras)
+            for id, cam in enumerate(camlist):
+                json_cams.append(camera_to_JSON(id, cam))
+            for id, cam in enumerate(train_camlist):
+                json_train_cams.append(camera_to_JSON(id, cam))
+            for id, cam in enumerate(scene_info.test_cameras):
+                json_test_cams.append(camera_to_JSON(id, cam))
+            with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
+                json.dump(json_cams, file)
+            with open(os.path.join(self.model_path, "train_cameras.json"), 'w') as file:
+                json.dump(json_train_cams, file)
+            with open(os.path.join(self.model_path, "test_cameras.json"), 'w') as file:
+                json.dump(json_test_cams, file)
+
+            
+        # --------------------------------- Load mesh -------------------------------- #
+        self.textured_mesh = None
+        # if texture mesh exists, then load mesh
+        # else skip it
+        if texture_obj_path is not None and os.path.exists(texture_obj_path):
+            print(f"[INFO] Found textured mesh at {texture_obj_path}, loading textured mesh for rendering.")
+            mesh_scene = trimesh.load(texture_obj_path, force='mesh') # same as load_textured_mesh_for_nvdiffrast() in mesh_loader_nvdiffrast.py, but with additional transform for axis alignment and scale normalization
+            # [BUG] Don't know why don't need to transform
+            # mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
+            #     angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
+            # ))
+            vertices = transform_vertices_function(
+                torch.tensor(mesh_scene.vertices),
+            )
+            faces = mesh_scene.faces
+            triangles = vertices[torch.tensor(mesh_scene.faces).long()].float()
+
+            self.mesh_scene = mesh_scene
+            self.vertices = vertices
+            self.faces = faces
+            self.triangles = triangles
+            
+            print("[INFO] Finished loading textured mesh, vertices shape: {}, faces shape: {}, triangles shape: {}".format(
+                self.vertices.shape, self.faces.shape, self.triangles.shape
+            ))
+        
+        # ------------------------------ Load Gaussians ------------------------------ #
+        # Gaussian can come from two formats
+        # 1) directly from point_cloud.ply file (same as original 3DGS)
+        # 2) from model_params.pt and point_cloud.ply (same as LMG)
+        # 3) Generate a dummy one from the input textured mesh, for warm starting (TODO)
+        if gs_path is not None and os.path.exists(gs_path):
+            gs_format = "lmg"
+            if gs_format == "original":
+                pass
+            elif gs_format == "lmg":
+                self.gaussians.load_lmg_gs(gs_path, self.vertices, self.faces)
+            else:
+                raise ValueError(f"Unsupported gs_type {gs_format} for loading pretrained gs model.")
+            print(f"[INFO] Loaded pretrained gs model from {gs_path} for warm starting.")
+        else:
+            print(f"[INFO] No pretrained gs model found at {gs_path}, creating gs model from pcd for the first time.")
+            # self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            
+            
+        
