@@ -66,10 +66,11 @@ def warmup(gs_type, dataset, opt, pipe,
             occlusion,
             policy_path,
             precaptured_mesh_img_path,
-            mesh_rasterizer_type="pytorch3d"
+            mesh_rasterizer_type="pytorch3d",
+            load_iter=0,
+            gs_path=None
             # <<<< [YC] add
             ):
-    
     # --------------------------- Warm Up Stage -------------------------- #
     
     # first_iter = 0
@@ -79,26 +80,50 @@ def warmup(gs_type, dataset, opt, pipe,
         
     print("[INFO] Scene initialization...")
     
-    # [TODO] Init warmup (without gs_path)
     scene = SceneSimple(args=dataset, 
                         gaussians=gaussians, 
                         texture_obj_path=texture_obj_path, 
-                        gs_path=None
+                        gs_path=gs_path
                         )
     
-    num_splats_per_triangle = my_get_num_splats_per_triangle(
-            dataset_path=dataset.source_path,
-            mesh_scene=scene.mesh_scene,
-            triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
-            viewpoint_camera_infos=scene.train_cam_infos, # [TODO] maybe should feed into other para
-            total_splats=dataset.total_splats,
-            budgeting_policy_name=dataset.alloc_policy,
-            policy_path=policy_path,
-            mesh_type=dataset.mesh_type,
-        )
+    if gs_path is None:
+        num_splats_per_triangle = my_get_num_splats_per_triangle(
+                dataset_path=dataset.source_path,
+                mesh_scene=scene.mesh_scene,
+                mesh_scene_for_render=scene.mesh_scene_for_render, 
+                triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+                viewpoint_cameras=scene.train_cameras[1], # [NOTE] 1 is resolution of images
+                total_splats=dataset.total_splats,
+                budgeting_policy_name=dataset.alloc_policy,
+                policy_path=policy_path,
+                mesh_type=dataset.mesh_type,
+                pipe=None, # for using mesh+gs for allocation
+                gaussians=None, # for using mesh+gs for allocation
+                debugging=False,
+                load_iter=load_iter
+            )
+    else:
+        num_splats_per_triangle = my_get_num_splats_per_triangle(
+                dataset_path=dataset.source_path,
+                mesh_scene=scene.mesh_scene,
+                mesh_scene_for_render=scene.mesh_scene_for_render, 
+                triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+                viewpoint_cameras=scene.train_cameras[1], # [NOTE] 1 is resolution of images
+                total_splats=dataset.total_splats,
+                budgeting_policy_name=dataset.alloc_policy,
+                policy_path=policy_path,
+                mesh_type=dataset.mesh_type,
+                pipe=pipe, # for using mesh+gs for allocation
+                gaussians=scene.gaussians, # for using mesh+gs for allocation
+                debugging=False,
+                load_iter=load_iter
+            )
        
     print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
     print(f"[INFO] Total number of splats allocated: {num_splats_per_triangle.sum()}")
+    
+    if load_iter > 0:
+        num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
     
     tri_avg_colors = get_tri_avg_colors(scene.mesh_scene) 
     
@@ -106,25 +131,61 @@ def warmup(gs_type, dataset, opt, pipe,
         model_path=dataset.model_path,
         triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
         num_splats_per_triangle=num_splats_per_triangle,
-        tri_avg_colors=tri_avg_colors
+        tri_avg_colors=tri_avg_colors,
     )
     
     gaussians.create_from_pcd(pcd, scene.cameras_extent)
     
     scene.gaussians = gaussians 
     
-    scene.save(0) # save the initialized scene as iteration 0
+    scene.save(load_iter, warmup=True) # save the initialized scene as iteration 0
     
-    # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp/hotdog/distortion_500_occlusion/point_cloud/iteration_0/point_cloud.ply"
-    scene = SceneSimple(args=dataset, 
-                        gaussians=gaussians, 
-                        texture_obj_path=texture_obj_path, 
-                        gs_path=gs_path
-                        )
-    scene.save(-1) # save the initialized scene as iteration 0
+    
+    
+    
+    
+    # # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
+    # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_0/point_cloud.ply"
+    # # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_5000/point_cloud.ply"
+    
+    # scene = SceneSimple(args=dataset, 
+    #                     gaussians=gaussians, 
+    #                     texture_obj_path=texture_obj_path, 
+    #                     gs_path=gs_path
+    #                     )
+    
+    # num_splats_per_triangle = my_get_num_splats_per_triangle(
+    #         dataset_path=dataset.source_path,
+    #         mesh_scene=scene.mesh_scene,
+    #         mesh_scene_for_render=scene.mesh_scene_for_render, 
+    #         triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+    #         viewpoint_cameras=scene.train_cameras[1], # [NOTE] 1 is resolution of images
+    #         total_splats=dataset.total_splats,
+    #         budgeting_policy_name=dataset.alloc_policy,
+    #         policy_path=policy_path,
+    #         mesh_type=dataset.mesh_type,
+    #         pipe=pipe, # for using mesh+gs for allocation
+    #         gaussians=scene.gaussians, # for using mesh+gs for allocation
+    #         debugging=False
+    #     )
+    
+    # num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
+    
+    # tri_avg_colors = get_tri_avg_colors(scene.mesh_scene) 
+    
+    # new_pcd = create_init_point_cloud(
+    #     model_path=dataset.model_path,
+    #     triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+    #     num_splats_per_triangle=num_splats_per_triangle,
+    #     tri_avg_colors=tri_avg_colors,
+    # )
+    
+    # gaussians.create_from_pcd(new_pcd, scene.cameras_extent)
+    
+    # scene.save(-1) # save the initialized scene as iteration 0
     
     # gaussians.training_setup(opt)
+    
     
     # # [TODO] Tricky part, but it is correct
     # if gs_type == "gs_mesh":
@@ -266,6 +327,9 @@ if __name__ == "__main__":
     parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
                         help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
     
+    parser.add_argument("--load_iter", type=int, default=-1, help="-1 means not loading and start from scratch")
+    parser.add_argument("--gs_path", type=str, default=None, help="path to the pretrained GS model to load for warmup initialization. If provided, will use this GS for warmup initialization instead of creating from point cloud.")
+    
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
     lp.num_splats = args.num_splats
@@ -311,26 +375,86 @@ if __name__ == "__main__":
         occlusion=args.occlusion,
         policy_path=args.policy_path,
         precaptured_mesh_img_path=args.precaptured_mesh_img_path,
-        mesh_rasterizer_type=args.mesh_rasterizer_type
+        mesh_rasterizer_type=args.mesh_rasterizer_type,
+        load_iter=args.load_iter,
+        gs_path=args.gs_path
         # <<<< [YC] add
     )
 
     # All done
     print("\n[INFO] Warmup complete.")
 
+#! Initialization
 """
-python warmup_dynamic.py --eval \
+python warmup_progressive.py --eval \
 --warmup_only \
 -s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
--m ./output/sample_exp/hotdog/distortion_100_occlusion \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0 \
 --texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
---debugging --debug_freq 1000 \
---gs_type gs_mesh \
+--debugging \
+--gs_type lmg \
 --occlusion \
---total_splats 100 --alloc_policy distortion \
---policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
+--total_splats 10000 --alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/load_iter_0/distortion_progressive_10000.npy \
 --precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
---iteration 1 \
+--load_iter 0 \
+--mesh_rasterizer_type nvdiffrast
+"""
+
+#! Warmup from iteration 1000
+"""
+python warmup_progressive.py --eval \
+--warmup_only \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging \
+--gs_type lmg \
+--occlusion \
+--total_splats 10000 --alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/load_iter_1000/distortion_progressive_10000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--load_iter 1000 \
+--gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/point_cloud/iteration_1000/point_cloud.ply \
+--mesh_rasterizer_type nvdiffrast
+"""
+
+#! Warmup from iteration 2000
+"""
+python warmup_progressive.py --eval \
+--warmup_only \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging \
+--gs_type lmg \
+--occlusion \
+--total_splats 10000 --alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000/load_iter_2000/distortion_progressive_10000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--load_iter 2000 \
+--gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/point_cloud/iteration_2000/point_cloud.ply \
+--mesh_rasterizer_type nvdiffrast
+"""
+
+
+#! Baseline
+"""
+python warmup_progressive.py --eval \
+--warmup_only \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging \
+--gs_type lmg \
+--occlusion \
+--total_splats 30000 --alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0/load_iter_0/distortion_progressive_30000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--load_iter 0 \
 --mesh_rasterizer_type nvdiffrast
 """

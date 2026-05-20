@@ -120,19 +120,25 @@ def get_num_splats_per_triangle(
 def my_get_num_splats_per_triangle(
     dataset_path: str,
     mesh_scene: trimesh.Trimesh,
+    mesh_scene_for_render: trimesh.Trimesh,
     triangles, faces, vertices,
-    viewpoint_camera_infos,
+    viewpoint_cameras,
     total_splats: int = None,
     budgeting_policy_name: str = "uniform",
     policy_path: str = None,
-    mesh_type: str = "sugar"
+    mesh_type: str = "sugar",
+    pipe=None,
+    gaussians=None,
+    debugging=True,
+    load_iter=0
 )-> np.ndarray: # [N,], number of splats on each triangle
     
     # define allocation_path only when policy_path provided
     allocation_path = Path(policy_path) if policy_path else None
     
     # load num_splats allocation policy from pre-computed file
-    if allocation_path is not None and allocation_path.exists():
+    # if allocation_path is not None and allocation_path.exists():
+    if False:
         print(f"[INFO] Loading splat allocation from: {allocation_path}")
         num_splats_per_triangle = np.load(allocation_path)
         print("[INFO] loaded distribution, max and min:", num_splats_per_triangle.max(), num_splats_per_triangle.min())
@@ -147,9 +153,13 @@ def my_get_num_splats_per_triangle(
         budgeting_policy = get_budgeting_policy(
             budgeting_policy_name, # choose "MyDistortionMapBudgetingPolicy"
             mesh=mesh_scene,
+            mesh_for_render=mesh_scene_for_render, # use mesh_scene_for_render for rasterization in num_splats allocation, since it preserves texture information and is more consistent with rendering stage; while mesh_scene is used for other purposes such as creating point cloud and saving the scene, since it is already transformed to be axis-aligned and scale-normalized
             mesh_type=mesh_type,
-            viewpoint_camera_infos=viewpoint_camera_infos, # access camera objects from cam_infos in the allocator somehow
-            dataset_path=dataset_path
+            viewpoint_cameras=viewpoint_cameras, # access camera objects from cam_infos in the allocator somehow
+            dataset_path=dataset_path,
+            pipe=pipe, # For GS
+            gaussians=gaussians, # For GS
+            debugging=debugging,
         )
         num_splats_per_triangle = budgeting_policy.allocate(
             total_splats=total_splats,
@@ -164,12 +174,13 @@ def my_get_num_splats_per_triangle(
         # budget: {total_splats}.npy
         # weights: weights.npy (same for any budget using the same policy & same mesh)
         num_tri = num_splats_per_triangle.shape[0]
-        allocation_save_path = Path(dataset_path) / f"policy" / f"mesh_{mesh_type}" / f"tri_{num_tri}" / f"{budgeting_policy_name}" / f"{total_splats}.npy"
+        allocation_save_path = Path(dataset_path) / f"policy" / f"mesh_{mesh_type}" / f"tri_{num_tri}" / f"{budgeting_policy_name}" / f"load_iter_{load_iter}" / f"{total_splats}.npy"
         allocation_save_path.parent.mkdir(parents=True, exist_ok=True)
         weights_save_path = allocation_save_path.parent / f"weights.npy"
+        allocation_path.parent.mkdir(parents=True, exist_ok=True)
         
         np.save(allocation_save_path, num_splats_per_triangle)
-        np.save(allocation_path, num_splats_per_triangle)
+        np.save(allocation_path, num_splats_per_triangle) # in model_path
         print(f"[INFO] Scene::Reader() Saving allocation policy file to: {allocation_save_path} and {allocation_path}")
 
         np.save(weights_save_path, budgeting_policy.weights)
@@ -469,7 +480,7 @@ def create_init_point_cloud(
     tri_indices_list = []
         
     static_alpha = torch.rand(100, 3) # [YC] add
-    torch.save(static_alpha, 'static_alpha.pt') # [YC] add
+    torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
         
     # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
     for i in range(triangles.shape[0]):
@@ -486,7 +497,6 @@ def create_init_point_cloud(
             alpha[:, 2:3] * triangles[i, 2])
 
         color = np.repeat(tri_avg_colors[i].reshape(1, 3), n, axis=0)  # (num_pts, 3)
-        # print(color.shape) # [YC] debug
         
         xyz_list.append(pts)
         alpha_list.append(alpha)
@@ -522,7 +532,8 @@ def create_init_point_cloud(
         faces=faces,
         transform_vertices_function=transform_vertices_function,
         triangles=triangles.cuda(),
-        triangle_indices=tri_indices
+        triangle_indices=tri_indices,
+        num_splats_per_triangle=num_splats_per_triangle
     )
     
     print("Created MeshPointCloud with", pcd.points.shape[0], "points.")
@@ -533,4 +544,81 @@ def create_init_point_cloud(
     # print("Stored initial point cloud to", ply_path)
     
     return pcd
+
+def create_delta_point_cloud(
+    model_path,
+    triangles, faces, vertices,
+    num_splats_per_triangle,
+    tri_avg_colors,
+    existing_num_splats_per_triangle
+):
+    # We create random points inside the bounds triangles
+    xyz_list = []
+    alpha_list = []
+    color_list = []
+    tri_indices_list = []
+        
+    static_alpha = torch.rand(100, 3) # [YC] add
+    torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
+        
+    # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
+    for i in range(triangles.shape[0]):
+        n = num_splats_per_triangle[i]
+        if n == 0:
+            continue
+            
+        # alpha = torch.rand(n, 3)
+        alpha = static_alpha[:n]
+        alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
+
+        pts = (alpha[:, 0:1] * triangles[i, 0] +
+            alpha[:, 1:2] * triangles[i, 1] +
+            alpha[:, 2:3] * triangles[i, 2])
+
+        color = np.repeat(tri_avg_colors[i].reshape(1, 3), n, axis=0)  # (num_pts, 3)
+        
+        xyz_list.append(pts)
+        alpha_list.append(alpha)
+        color_list.append(color)
+        tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
+ 
+    # [DEBUG] Check if xyz_list is populated
+    print(f"[DEBUG] xyz_list length: {len(xyz_list)}")
+    if len(xyz_list) == 0:
+        print("[ERROR] xyz_list is empty! No points were generated from triangles.")
+        print(f"[DEBUG] triangles shape: {triangles.shape}")
+        print(f"[DEBUG] num_pts_each_triangle: {num_splats_per_triangle}")
+        raise RuntimeError("Failed to generate random points inside triangles")
+        
+    num_pts = num_splats_per_triangle.sum()
+       
+    xyz = torch.cat(xyz_list, dim=0)
+    xyz = xyz.reshape(num_pts, 3)
     
+    alpha = torch.cat(alpha_list, dim=0)
+    
+    colors = np.concatenate(color_list, axis=0)
+    
+    tri_indices = torch.cat(tri_indices_list, dim=0)        
+        
+    pcd = MeshPointCloud(
+        alpha=alpha,
+        points=xyz,
+        colors=colors/255.0,
+        normals=np.zeros((num_pts, 3)),
+        vertices=vertices,
+        faces=faces,
+        transform_vertices_function=transform_vertices_function,
+        triangles=triangles.cuda(),
+        triangle_indices=tri_indices,
+        num_splats_per_triangle=num_splats_per_triangle
+    )
+    
+    print("Created MeshPointCloud with", pcd.points.shape[0], "points.")
+
+    # # storePly(ply_path, pcd.points, SH2RGB(shs) * 255)
+    # ply_path = os.path.join(model_path, "points3d.ply") 
+    # storePly(ply_path, pcd.points, colors)
+    # print("Stored initial point cloud to", ply_path)
+    
+    return pcd

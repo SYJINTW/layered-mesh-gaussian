@@ -105,8 +105,8 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "texture_focus": None,
         "texture_avoid": None,
         
-        # "distortion": DistortionMapBudgetingPolicy, #! [XXX]
-        "distortion": MyDistortionMapBudgetingPolicy, #! [XXX]
+        "distortion": DistortionMapBudgetingPolicy, #! [XXX]
+        "distortion_progressive": ProgressiveDistortionMapBudgetingPolicy, #! [XXX]
         "distortion_no_avg": partial(DistortionMapBudgetingPolicy, is_averaging_across_views=False),
         
         "mixed": partial(MixedBudgetingPolicy), # not yet implemented
@@ -1087,7 +1087,8 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         except Exception as e:
             print(f"[WARNING] Could not save debug visualization: {e}")
 
-class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
+
+class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
     """
     Allocate points based on distortion/error of rendering textured mesh vs ground truths.
     Higher distortion -> more points.
@@ -1101,7 +1102,9 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
     def __init__(
         self, 
         mesh: trimesh.Trimesh,
-        viewpoint_camera_infos = None, # pass in CamInfo, get Camera later
+        mesh_for_render: trimesh.Trimesh = None,  # separate mesh for rendering to avoid loading issues
+        gaussians = None, pipe=None,
+        viewpoint_cameras = None,
         dataset_path: str = None,
         faces_per_pixel: int = 1,
         device: str = "cuda",
@@ -1110,29 +1113,21 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
         **kwargs
     ):
         super().__init__(mesh, **kwargs)
-        self.viewpoint_camera_infos = viewpoint_camera_infos
+        self.mesh_for_render = mesh_for_render
+        self.gaussians = gaussians
+        self.pipe = pipe
+        self.viewpoint_cameras = viewpoint_cameras
+        assert isinstance(self.viewpoint_cameras[0], Camera), "DistorsionMapPolicy::can't get Camera objects for view_points"
         self.dataset_path = dataset_path
         self.faces_per_pixel = faces_per_pixel
         self.device = device
         self.debugging = debugging
-        # self.p3d_mesh = p3d_mesh  # Store the passed-in mesh
         self.is_averaging_across_views = is_averaging_across_views
+        
         if self.is_averaging_across_views:
             print(f"[INFO] DistortionMapBudgeter:: Averaging distortion across views")
         else: 
             print(f"[INFO] DistortionMapBudgeter:: Not averaging distortion across views")
-        
-        assert self.viewpoint_camera_infos is not None and len(self.viewpoint_camera_infos) != 0, "DistorsionMapPolicy::Missing CamInfos"
-
-        # Build Camera objects
-        args = SimpleNamespace(resolution= -1, data_device=device) # dummy args
-        
-        # this camera should be freed after use?
-        self.viewpoint_cameras = cameraList_from_camInfos(
-            self.viewpoint_camera_infos, resolution_scale=1.0, 
-            args=args
-        )
-        assert isinstance(self.viewpoint_cameras[0], Camera), "DistorsionMapPolicy::can't get Camera objects for view_points"
 
         # Compute distortion weights and assign to self.weights
         distortion_weights = self._compute_distortion_weights()
@@ -1193,20 +1188,31 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
             for local_idx, viewpoint_camera in enumerate(batch_cameras):
                 idx = batch_start + local_idx
                 
-                # Get camera-specific dimensions
-                cam_height = viewpoint_camera.image_height
-                cam_width = viewpoint_camera.image_width
+                # # Get camera-specific dimensions
+                # cam_height = viewpoint_camera.image_height
+                # cam_width = viewpoint_camera.image_width
                 
                 # Get ground truth image - already [C, H, W] on GPU
                 gt_img = viewpoint_camera.original_image  # [C, H, W]
                 
-                render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
-                                pc=None, pipe=None, 
-                                bg_color=None, bg_depth=None, 
-                                textured_mesh=self.mesh,
-                                mesh_background_color=(1.0, 1.0, 1.0),
-                                mesh_rasterizer_type="nvdiffrast"
-                                )
+                if self.gaussians is None:
+                    render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
+                                    pc=None, pipe=None, 
+                                    bg_color=None, bg_depth=None, 
+                                    textured_mesh=self.mesh_for_render,
+                                    mesh_background_color=(1.0, 1.0, 1.0),
+                                    mesh_rasterizer_type="nvdiffrast"
+                                    )
+                else:
+                    print("[INFO] Render both gs and mesh for distortion computation")
+                    render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
+                                    pc=self.gaussians, pipe=self.pipe, 
+                                    bg_color=None, bg_depth=None, 
+                                    textured_mesh=self.mesh_for_render,
+                                    mesh_background_color=(1.0, 1.0, 1.0),
+                                    mesh_rasterizer_type="nvdiffrast"
+                                    )
+                    
                 mesh_color_rgb = render_pkg["render"]
                 fragments = render_pkg["fragments"]
                 # print("[DEBUG] Rendered RGB shape (rasterizer):", mesh_color_rgb.shape)
@@ -1247,7 +1253,7 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
                         "image_name": getattr(viewpoint_camera, "image_name", f"view_{idx}"),
                         "p3d_mesh_color": mesh_color_rgb.cpu(),
                         "gt": gt_img.cpu(),
-                        "dist_map": dist_map.cpu().numpy(),
+                        "dist_map": dist_map.detach().cpu().numpy(),
                     })
         
             # Free memory after each batch
@@ -1257,24 +1263,16 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
         batch_pbar.close()
         
         # Move final result to CPU
-        dist_map_all_np = dist_map_all.cpu().numpy()
+        dist_map_all_np = dist_map_all.detach().cpu().numpy()
+        
+        dist_norm = (dist_map_all_np - dist_map_all_np.min()) / (dist_map_all_np.max() - dist_map_all_np.min() + EPS)
         
         if self.debugging:
             print(f"[DEBUG] Distortion weights (pre-normalization) stats - min: {dist_map_all_np.min():.4f}, max: {dist_map_all_np.max():.4f}, mean: {dist_map_all_np.mean():.4f}")
             self._save_debug_visualization(dist_map_all_np, per_view_debug=per_view_debug)
-            
-            # # check mesh format and coordinate systems
-            # print(f"[DEBUG] p3d_mesh verts range: {self.mesh.verts_packed().min():.4f} to {self.mesh.verts_packed().max():.4f}")
-            # print(f"[DEBUG] tm2p3d_mesh verts range: {tm2p3d_mesh.verts_packed().min():.4f} to {tm2p3d_mesh.verts_packed().max():.4f}")
-            # print(f"[DEBUG] Verts match: {torch.allclose(self.mesh.verts_packed(), tm2p3d_mesh.verts_packed())}")
-            # print(f"[DEBUG] Faces match: {torch.equal(self.mesh.faces_packed(), tm2p3d_mesh.faces_packed())}")
-            
-            dist_norm = (dist_map_all_np - dist_map_all_np.min()) / (dist_map_all_np.max() - dist_map_all_np.min() + EPS)
             print(f"[DEBUG] Distortion weights computed:")
             print(f"  - Non-zero triangles: {np.count_nonzero(dist_norm)}/{num_faces}")
-            print(f"  - Weight range: [{dist_norm.min():.4f}, {dist_norm.max():.4f}]")
-        else:
-            dist_norm = (dist_map_all_np - dist_map_all_np.min()) / (dist_map_all_np.max() - dist_map_all_np.min() + EPS)
+            print(f"  - Weight range: [{dist_norm.min():.4f}, {dist_norm.max():.4f}]")    
     
         assert dist_map_all.max() >= 0, "Distortion map contains negative values."
         
@@ -1349,4 +1347,3 @@ class MyDistortionMapBudgetingPolicy(BudgetingPolicy):
             print(f"[INFO] Saved distortion debug to {base_dir}")
         except Exception as e:
             print(f"[WARNING] Could not save debug visualization: {e}")
-

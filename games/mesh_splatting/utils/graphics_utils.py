@@ -27,3 +27,4 @@ class MeshPointCloud(NamedTuple):
     transform_vertices_function: object
     triangles: torch.Tensor
     triangle_indices: Optional[torch.Tensor] = None # [YC] add
+    num_splats_per_triangle: Optional[torch.Tensor] = None # [YC] add

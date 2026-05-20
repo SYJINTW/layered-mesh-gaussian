@@ -21,6 +21,7 @@ from utils.loss_utils import l1_loss, ssim
 from renderer.mesh_splat_renderer import render, network_gui
 import sys
 from scene import Scene
+from scene import SceneSimple
 from games import (
     optimizationParamTypeCallbacks,
     gaussianModel
@@ -79,7 +80,6 @@ import matplotlib.cm as cm
 LOSS_CONVG_THRESH = 0.01
 
 
-   
 def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
             debug_from, save_xyz,
             # >>>> [YC] add
@@ -88,140 +88,39 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             occlusion,
             policy_path,
             precaptured_mesh_img_path,
-            mesh_rasterizer_type="pytorch3d"
+            mesh_rasterizer_type="pytorch3d",
+            load_gs_path=None,
+            start_iteration=0
             # <<<< [YC] add
             ):
     
     # --------------------------- Warm Up Stage -------------------------- #
     
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    # tb_writer = prepare_output_and_logger(dataset)
     gaussians = gaussianModel[gs_type](dataset.sh_degree) # [YC] note: nothing changing here
     print("[INFO] Training() policy_path:", policy_path)
-        
-    # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
-    if gs_type == "gs_mesh":
-        if mesh_rasterizer_type == "pytorch3d":
-            textured_mesh = load_textured_mesh(dataset, texture_obj_path)
-        elif mesh_rasterizer_type == "nvdiffrast":
-            textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-    else:
-        textured_mesh = None
-    # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.
-    # because, why pass the path when its already loaded right here?
-    # <<<< [YC] add
     
+    scene = SceneSimple(args=dataset, 
+                        gaussians=gaussians, 
+                        texture_obj_path=texture_obj_path, 
+                        gs_path=load_gs_path
+                        )
     
     #! [YC] note: main changing point is here
-    
-    print("[DEBUG] going into Scene initialization...")
-    
-    scene = Scene(dataset, gaussians, policy_path=policy_path, texture_obj_path=texture_obj_path, textured_mesh=textured_mesh)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
     if debugging:
-        print("[DEBUG] [INFO] Debugging mode is on.")
         check_path = Path(scene.model_path)/"debugging"/"training_check"
         check_path.mkdir(parents=True, exist_ok=True)
-    
-    if dataset.warmup_only:
-        if not precaptured_mesh_img_path:
-            raise ValueError("precaptured_mesh_img_path must be provided for warmup_only mode")
-        
-        # ------------------------------ Training Camera ----------------------------- #
-        # Precapture mesh_bg and mesh_bg_depth in warmup stage
-        precaptured_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type /f"mesh_texture"
-        precaptured_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / f"mesh_depth"
-        
-        # Ensure directories exist
-        precaptured_bg_dir.mkdir(parents=True, exist_ok=True)
-        precaptured_depth_dir.mkdir(parents=True, exist_ok=True)
-        
-        print("[INFO] Warmup stage: Generating precaptured mesh background and depth images...")
-        
-        for cam in tqdm(scene.getTrainCameras(), desc="Precapturing training backgrounds", unit="camera"):
-            # Generate file paths
-            bg_save_path = precaptured_bg_dir / f"{cam.image_name}.png"
-            depth_save_path = precaptured_depth_dir / f"{cam.image_name}.pt"
-            
-            # Skip if already exists
-            if bg_save_path.exists() and depth_save_path.exists():
-                print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
-                continue
-            
-            # Render background and depth
-            bg_color = (1,1,1) if dataset.white_background else (0,0,0)
-            render_pkg = render(cam, gaussians, pipe, 
-                                bg_color=None, bg_depth=None, 
-                                textured_mesh=scene.textured_mesh,
-                                mesh_background_color=bg_color,
-                                mesh_rasterizer_type=mesh_rasterizer_type
-                                )
-            
-            # Save background image
-            bg_image = render_pkg["bg_color"].detach().clamp(0, 1).cpu()
-            bg_image_pil = TF.to_pil_image(bg_image)
-            bg_image_pil.save(bg_save_path)
-            
-            # Save depth image
-            bg_depth = render_pkg["bg_depth"].detach().cpu()
-            torch.save(bg_depth, depth_save_path)
-            
-            print(f"[INFO] Saved precaptured results for [training] {cam.image_name}")
-        
-        
-        # ------------------------------- Testing Camera ------------------------------ #
-        precaptured_test_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_texture"
-        precaptured_test_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_depth"
-        
-        precaptured_test_bg_dir.mkdir(parents=True, exist_ok=True)
-        precaptured_test_depth_dir.mkdir(parents=True, exist_ok=True)
-        
-        for cam in tqdm(scene.getTestCameras(), desc="Precapturing test backgrounds", unit="camera"):
-            bg_save_path = precaptured_test_bg_dir / f"{cam.image_name}.png"
-            depth_save_path = precaptured_test_depth_dir / f"{cam.image_name}.pt"
-            
-            # Skip if already exists
-            if bg_save_path.exists() and depth_save_path.exists():
-                print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
-                continue
-            
-            # [DONE] fix black background issue in precapture stage
-            # didn't pass bg=[0,0,0] into the mesh_renderer_pytorch3d()
-            # Render background and depth
-            
-            bg_color = (1,1,1) if dataset.white_background else (0,0,0)
-            render_pkg = render(cam, gaussians, pipe, 
-                                bg_color=None, bg_depth=None, 
-                                textured_mesh=scene.textured_mesh,
-                                mesh_background_color=bg_color,
-                                mesh_rasterizer_type=mesh_rasterizer_type
-                                )
-            
-            # Save background image
-            bg_image = render_pkg["bg_color"].detach().clamp(0, 1).cpu()
-            bg_image_pil = TF.to_pil_image(bg_image)
-            bg_image_pil.save(bg_save_path)
-            
-            # Save depth image
-            bg_depth = render_pkg["bg_depth"].detach().cpu()
-            torch.save(bg_depth, depth_save_path)
-            
-            print(f"[INFO] Saved precaptured results for [testing] {cam.image_name}")
-        
-        
-        print("[INFO] Warmup stage complete. Exiting...")
-        exit() # [NOTE] early exit for warmup-only stage     
-    
     
     print("[INFO] Finished Warm-Up, Start Training..." )
     #  ------------------------Warm Up Done--------------------------- #
     
-    
-    # [NOTE] the background fetched in this part is for network GUI debugger only 
+    # [BUG] the background fetched in this part is for network GUI debugger only 
     # (not used by us, and not used by training loop)
     # --------------------------- Load background image -------------------------- #
     background_image_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_texture/r_0.png"
@@ -239,8 +138,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     # ----------------------------- Load depth image ----------------------------- #
     background_depth_pt_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_depth/r_0.pt"
     background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
-    # <<<< [YC]
 
+    
     # ---------------------------------------------------------------------------- #
     #                              Start Training Loop                             #
     # ---------------------------------------------------------------------------- #
@@ -257,10 +156,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     
-    # [TODO] test on a gs_type=gs
-    
-    if gs_type == "gs_mesh":
-        
+    if gs_type == "gs_mesh" or gs_type == "lmg":
         if occlusion:
             print("[INFO] DTGS training:: using Depth+Texture+GS rasterizer with occlusion for gs_mesh")
         else:
@@ -268,8 +164,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     elif gs_type == "gs":
         print("[INFO] GS training:: using original GS rasterizer for gs")
     else: 
-        pass        
-    
+        pass
     
     for iteration in range(first_iter, opt.iterations + 1):
         os.makedirs(f"{scene.model_path}/xyz", exist_ok=True)
@@ -285,7 +180,9 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                 if custom_cam != None:
                     print("[INFO] Received custom camera for rendering")
                     # net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
-                    net_image = render(custom_cam, gaussians, pipe, background, background_depth, scaling_modifer)["render"] # [YC] add
+                    net_image = render(custom_cam, gaussians, pipe, 
+                                       background, background_depth, 
+                                       scaling_modifer)["render"] # [YC] add
                     net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2,
                                                                                                                0).contiguous().cpu().numpy())
                 network_gui.send(net_image_bytes, dataset.source_path)
@@ -301,12 +198,10 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
-            print(f"[DEBUG] Train:: current SH degree: {gaussians.active_sh_degree}")
 
         # Pick a random Camera
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
-        
         rand_cam_id = randint(0, len(viewpoint_stack) - 1)
         viewpoint_cam = viewpoint_stack.pop(rand_cam_id)
         
@@ -315,40 +210,25 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         # ---------------------------------------------------------------------------- #
         viewpoint_camera_height = viewpoint_cam.image_height
         viewpoint_camera_width = viewpoint_cam.image_width
-        print("[DEBUG] viewpoint_camera_height:", viewpoint_camera_height, "viewpoint_camera_width:", viewpoint_camera_width)
         
         transform = T.Compose([
             T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
         ])
         
         # ------------------------------ Mesh background ----------------------------- #
-        
         if precaptured_mesh_img_path:
             cached_bg_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")
                 img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR)  # (W, H)
                 bg = transform(img).to(torch.float32).cuda()
-            #     if iteration % debug_freq == 0:
-            #         print(f"[INFO] [DEBUG] Loaded cached background image from {cached_bg_path}")
-                
-            # else:
-            #     if iteration % debug_freq == 0:
-            #         print(f"[INFO] Cached background image not found at {cached_bg_path}, skipping...")
-        
+            
         # ------------------------------ Mesh depth background ----------------------------- #
         # [TODO] perhaps prefetch everything at the start of training?
         if precaptured_mesh_img_path:
             cached_bg_depth_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
             if cached_bg_depth_path.exists():
                 bg_depth = torch.load(cached_bg_depth_path).unsqueeze(0).to("cuda")
-            #     if iteration % debug_freq == 0:
-            #         print(f"[INFO] [DEBUG] Loaded cached depth image from {cached_bg_depth_path}")
-                
-            # else:
-            #     if iteration % debug_freq == 0:
-            #         print(f"[INFO] Cached depth image not found at {cached_bg_depth_path}, skipping...")
-
 
         # ------------------------------ Pure background ----------------------------- #
         pure_bg_template = [1, 1, 1] if dataset.white_background else [0, 0, 0]
@@ -362,17 +242,15 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
-        # >>>> [YC]
         # -------------------------- Rendering for training -------------------------- #
         if gs_type == "gs":
             render_pkg = render(viewpoint_cam, gaussians, pipe, 
                                 bg_color=pure_bg, bg_depth=pure_bg_depth)
-        elif gs_type == "gs_mesh":
+        elif gs_type == "gs_mesh" or gs_type == "lmg":
             if occlusion: # [YC] use occlusion diff-gaussian-rasterizer for training
                 render_pkg = render(viewpoint_cam, gaussians, pipe, 
                                     bg_color=bg, bg_depth=bg_depth, 
                                     textured_mesh=scene.textured_mesh)
-                # [YC] if there bg or bg_depth isn't provided, but textured mesh is given, it will use mesh renderer to produce bg and bg_depth
                 
             else: # [YC] use original diff-gaussian-rasterizer for training
                 render_pkg = render(viewpoint_cam, gaussians, pipe, 
@@ -383,35 +261,30 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         image = render_pkg["render"]
         viewspace_point_tensor, visibility_filter, radii = render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         
-        # -------------------------- Load ground truth image ------------------------- #
-        
-        if iteration % debug_freq == 0:
-            print(f"[DEBUG] Training Iteration {iteration}, viewpoint: {viewpoint_cam.image_name}")
-        
-        
-        # [DONE] fix hardcoded old path and handle black/white background
+        # -------------------------- Load ground truth image ------------------------- #    
         gt_image = viewpoint_cam.original_image.cuda()
          
         # -------------------------- Save debugging visualizations ------------------------- #
         if debugging:
             # ------------------- Change Tensor to PIL.Image for saving ------------------ #
             if iteration % debug_freq == 0:
+                print(f"[DEBUG] Training Iteration {iteration}, viewpoint: {viewpoint_cam.image_name}")
                 # ---------------------------- Ground truth image ---------------------------- #
                 gt_img_to_save = gt_image.detach().clamp(0, 1).cpu()
                 gt_img_pil = TF.to_pil_image(gt_img_to_save)
-                gt_img_pil.save(check_path/f"{iteration}_gt.png")
+                gt_img_pil.save(check_path/f"{iteration+start_iteration}_gt.png")
                 
                 # ------------------------ Render image from training ------------------------ #
                 img_to_save = image.detach().clamp(0, 1).cpu()
                 img_pil = TF.to_pil_image(img_to_save)
-                img_pil.save(check_path/f"{iteration}_training.png")
+                img_pil.save(check_path/f"{iteration+start_iteration}_training.png")
                 
                 # ----------------------- Background image for training ---------------------- #
                 img_to_save = render_pkg["bg_color"].detach().clamp(0, 1).cpu()
                 img_pil = TF.to_pil_image(img_to_save)
-                img_pil.save(check_path/f"{iteration}_training_mesh_bg.png")
+                img_pil.save(check_path/f"{iteration+start_iteration}_training_mesh_bg.png")
                 
-                if gs_type == "gs_mesh":
+                if gs_type == "gs_mesh" or gs_type == "lmg":
                     # ------------- Render mesh background and depth background ------------- #
                     # [1, 1, 1]
                     render_mesh_with_depth = render(viewpoint_cam, gaussians, pipe, 
@@ -421,7 +294,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
                     img_to_save = _image.detach().clamp(0, 1).cpu()
                     img_pil = TF.to_pil_image(img_to_save)
-                    img_pil.save(check_path/f"{iteration}_gs_mesh_with_depth.png")
+                    img_pil.save(check_path/f"{iteration+start_iteration}_gs_mesh_with_depth.png")
                 
                     # ------------- Render mesh background and fake depth background ------------- #
                     # [0, 1, 1]
@@ -432,7 +305,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
                     img_to_save = _image.detach().clamp(0, 1).cpu()
                     img_pil = TF.to_pil_image(img_to_save)
-                    img_pil.save(check_path/f"{iteration}_gs_mesh_wo_depth.png")
+                    img_pil.save(check_path/f"{iteration+start_iteration}_gs_mesh_wo_depth.png")
 
                     # ------------- Render pure background and mesh depth background ------------- #
                     # [1, 0, 1]
@@ -443,7 +316,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                     
                     img_to_save = _image.detach().clamp(0, 1).cpu()
                     img_pil = TF.to_pil_image(img_to_save)
-                    img_pil.save(check_path/f"{iteration}_gs_pure_with_depth.png")
+                    img_pil.save(check_path/f"{iteration+start_iteration}_gs_pure_with_depth.png")
                 
                     # ------------- Render pure background and fake depth background ------------- #
                     # [1, 1, 1]
@@ -454,18 +327,13 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                     
                     img_to_save = _image.detach().clamp(0, 1).cpu()
                     img_pil = TF.to_pil_image(img_to_save)
-                    img_pil.save(check_path/f"{iteration}_gs_pure_wo_depth.png")
-            # <<<< [YC]
+                    img_pil.save(check_path/f"{iteration+start_iteration}_gs_pure_wo_depth.png")
             
         # Compute loss and backpropagate
         Ll1 = l1_loss(image, gt_image)
         current_ssim = ssim(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - current_ssim)
         
-        # # Brutally adjust loss, but keeping the backward information
-        # Ll1 = 0.0
-        # loss = image.mean() * 0.0 + 0.5
-
         loss.backward()
         
         iter_end.record()
@@ -475,7 +343,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             history_loss.append(loss.item())
             history_l1.append(Ll1.item())
             history_ssim.append(current_ssim.item())
-            
+                
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
@@ -490,9 +358,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             #                 testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
+                scene.save(iteration+start_iteration)
 
-            #! [YC] note: original "gs_mesh" will skip densification
             # Densification
             if (args.gs_type == "gs") or (args.gs_type == "gs_flat"):
                 if iteration < opt.densify_until_iter:
@@ -509,11 +376,9 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                     if iteration % opt.opacity_reset_interval == 0 or (
                             dataset.white_background and iteration == opt.densify_from_iter):
                         gaussians.reset_opacity()
-            # >>>> [YC] add
-            elif args.gs_type == "gs_mesh":
+            elif args.gs_type == "gs_mesh" or args.gs_type == "lmg":
                 pass
-            # <<<< [YC] add
-
+            
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
@@ -527,7 +392,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             gaussians.update_alpha()
         if hasattr(gaussians, 'prepare_scaling_rot'):
             gaussians.prepare_scaling_rot()
-
+            
     # ================= 迴圈結束，開始畫圖 ================= #
     print("[INFO] Training complete. Generating metrics plots...")
 
@@ -638,74 +503,6 @@ def load_textured_mesh(dataset, texture_obj_path: str) -> Meshes:
 def load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path: str) -> Meshes:
     return trimesh.load(texture_obj_path, force='mesh')
 
-def prepare_output_and_logger(args):
-    if not args.model_path:
-        if os.getenv('OAR_JOB_ID'):
-            unique_str = os.getenv('OAR_JOB_ID')
-        else:
-            unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
-
-    # Set up output folder
-    print("[INFO] Output folder: {}".format(args.model_path))
-    os.makedirs(args.model_path, exist_ok=True)
-    with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
-        cfg_log_f.write(str(Namespace(**vars(args))))
-
-    # Create Tensorboard writer
-    tb_writer = None
-    if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
-    else:
-        print("[INFO] Tensorboard not available: not logging progress")
-    return tb_writer
-
-
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene: Scene, renderFunc,
-                    renderArgs):
-    if tb_writer:
-        tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
-        tb_writer.add_scalar('iter_time', elapsed, iteration)
-
-    # Report test and samples of training set
-    if iteration in testing_iterations:
-        torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras': scene.getTestCameras()},
-                              {'name': 'train',
-                               'cameras': [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in
-                                           range(5, 30, 5)]})
-
-        for config in validation_configs:
-            if config['cameras'] and len(config['cameras']) > 0:
-                l1_test = 0.0
-                psnr_test = 0.0
-                for idx, viewpoint in enumerate(config['cameras']):
-                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
-                    gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name),
-                                             image[None], global_step=iteration)
-                        if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name),
-                                                 gt_image[None], global_step=iteration)
-                    l1_test += l1_loss(image, gt_image).mean().double()
-                    psnr_test += psnr(image, gt_image).mean().double()
-                psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
-                if tb_writer:
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
-
-        if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
-        torch.cuda.empty_cache()
-
-
-
-
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -749,6 +546,9 @@ if __name__ == "__main__":
     parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
                         help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
     
+    parser.add_argument("--load_gs_path", type=str, default=None, help="path to the pretrained GS model to load for training initialization")
+    parser.add_argument("--start_iteration", type=int, default=0, help="iteration number to start training from, used together with --load_gs_path")
+    
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
     lp.num_splats = args.num_splats
@@ -791,9 +591,91 @@ if __name__ == "__main__":
         occlusion=args.occlusion,
         policy_path=args.policy_path,
         precaptured_mesh_img_path=args.precaptured_mesh_img_path,
-        mesh_rasterizer_type=args.mesh_rasterizer_type
+        mesh_rasterizer_type=args.mesh_rasterizer_type,
+        load_gs_path=args.load_gs_path,
+        start_iteration=args.start_iteration
         # <<<< [YC] add
     )
 
     # All done
     print("\n[INFO] Training complete.")
+
+
+#! First training
+"""
+python train_progressive.py --eval \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging --debug_freq 100 \
+--occlusion \
+--total_splats 10000 \
+--alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/load_iter_0/distortion_progressive_10000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--gs_type lmg \
+--iteration 1000 --save_iterations 500 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/point_cloud/iteration_0_warmup/point_cloud.ply
+"""
+
+# 1000 - 2000
+"""
+python train_progressive.py --eval \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging --debug_freq 100 \
+--occlusion \
+--total_splats 10000 \
+--alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/load_iter_1000/distortion_progressive_10000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--gs_type lmg \
+--iteration 1000 --save_iterations 500 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/point_cloud/iteration_1000_warmup/point_cloud.ply \
+--start_iteration 1000
+"""
+
+# 2000 - 3000
+"""
+python train_progressive.py --eval \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging --debug_freq 100 \
+--occlusion \
+--total_splats 10000 \
+--alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000/load_iter_2000/distortion_progressive_10000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--gs_type lmg \
+--iteration 1000 --save_iterations 500 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000/point_cloud/iteration_2000_warmup/point_cloud.ply \
+--start_iteration 2000
+"""
+
+
+#! Baseline
+"""
+python train_progressive.py --eval \
+-s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-m ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0 \
+--texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--mesh_type milo \
+--debugging --debug_freq 100 \
+--occlusion \
+--total_splats 30000 \
+--alloc_policy distortion_progressive \
+--policy_path ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0/load_iter_0/distortion_progressive_30000.npy \
+--precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--gs_type lmg \
+--iteration 3000 --save_iterations 1000 2000 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0/point_cloud/iteration_0_warmup/point_cloud.ply
+"""

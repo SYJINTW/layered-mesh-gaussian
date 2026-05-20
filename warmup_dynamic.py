@@ -292,32 +292,16 @@ if __name__ == "__main__":
 python warmup_dynamic.py --eval \
 --warmup_only \
 -s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
--m ./output/sample_exp/hotdog/distortion_100_occlusion \
+-m ./output/sample_exp/hotdog/distortion_500_occlusion \
 --texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging --debug_freq 1000 \
 --gs_type gs_mesh \
 --occlusion \
---total_splats 100 --alloc_policy distortion \
---policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
+--total_splats 500 --alloc_policy distortion \
+--policy_path ./output/sample_exp/hotdog/distortion_500_occlusion/distortion_500.npy \
 --precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
 --iteration 1 \
 --mesh_rasterizer_type nvdiffrast
 """
 
-"""
-python warmup_dynamic.py --eval \
---warmup_only \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
--m ./output/sample_exp/hotdog/distortion_5000_occlusion \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
---mesh_type milo \
---debugging --debug_freq 1000 \
---gs_type gs_mesh \
---occlusion \
---total_splats 5000 --alloc_policy distortion \
---policy_path ./output/sample_exp/hotdog/distortion_5000_occlusion/distortion_5000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
---iteration 1 \
---mesh_rasterizer_type nvdiffrast
-"""

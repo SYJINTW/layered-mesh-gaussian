@@ -242,7 +242,10 @@ class SceneSimple(Scene):
                 # <<<< [YC] add
                 ):
         """b
-        :param path: Path to colmap scene main folder.
+        This initializer is simplified and only do three things:
+        1) Load cameras
+        2) Load textured mesh if exists (for mesh-based splatting)
+        3) Load pretrained gs model if exists, else create gs model from pcd
         """
         self.model_path = args.model_path
         self.loaded_iter = None
@@ -252,6 +255,7 @@ class SceneSimple(Scene):
         self.vertices = None
         self.faces = None
         self.triangles = None
+        self.mesh_scene_for_render = None
         
         # Gaussian scene
         self.gaussians = gaussians
@@ -329,17 +333,19 @@ class SceneSimple(Scene):
         # else skip it
         if texture_obj_path is not None and os.path.exists(texture_obj_path):
             print(f"[INFO] Found textured mesh at {texture_obj_path}, loading textured mesh for rendering.")
-            mesh_scene = trimesh.load(texture_obj_path, force='mesh') # same as load_textured_mesh_for_nvdiffrast() in mesh_loader_nvdiffrast.py, but with additional transform for axis alignment and scale normalization
+            mesh_scene_for_render = trimesh.load(texture_obj_path, force='mesh') # for rendering only, keep it as a scene to preserve texture information
             # [BUG] Don't know why don't need to transform
-            # mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-            #     angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-            # ))
+            mesh_scene = trimesh.load(texture_obj_path, force='mesh') # same as load_textured_mesh_for_nvdiffrast() in mesh_loader_nvdiffrast.py, but with additional transform for axis alignment and scale normalization
+            mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
+                angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
+            ))
             vertices = transform_vertices_function(
                 torch.tensor(mesh_scene.vertices),
             )
             faces = mesh_scene.faces
             triangles = vertices[torch.tensor(mesh_scene.faces).long()].float()
 
+            self.mesh_scene_for_render = mesh_scene_for_render
             self.mesh_scene = mesh_scene
             self.vertices = vertices
             self.faces = faces
@@ -366,6 +372,13 @@ class SceneSimple(Scene):
         else:
             print(f"[INFO] No pretrained gs model found at {gs_path}, creating gs model from pcd for the first time.")
             # self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
-            
+    
+    def save(self, iteration, warmup=False):
+        if warmup:
+            point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}_warmup".format(iteration))    
+        else:
+            point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
+        self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+    
             
         

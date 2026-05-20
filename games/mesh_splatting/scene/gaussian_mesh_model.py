@@ -59,7 +59,7 @@ class GaussianMeshModel(GaussianModel):
         self.spatial_lr_scale = spatial_lr_scale
         
         self.triangle_indices = pcd.triangle_indices.cuda() # [YC] add
-
+        
         loaded_alpha = torch.load('static_alpha.pt')
         print(f"[DEBUG] Loaded tensor shape: {loaded_alpha.shape}")
         pcd_alpha_shape = pcd.alpha.shape
@@ -417,19 +417,16 @@ class LMGModel(GaussianModel):
     def get_xyz(self):
         return self._xyz
 
+    # For training
     def create_from_pcd(self, pcd: MeshPointCloud, spatial_lr_scale: float):
-        print("[DEBUG] Creating GaussianMeshModel from point cloud...")
+        print("[DEBUG] Creating LMGModel from point cloud...")
         
         self.point_cloud = pcd
         self.triangles = self.point_cloud.triangles
         self.spatial_lr_scale = spatial_lr_scale
         
         self.triangle_indices = pcd.triangle_indices.cuda() # [YC] add
-
-        loaded_alpha = torch.load('static_alpha.pt')
-        print(f"[DEBUG] Loaded tensor shape: {loaded_alpha.shape}")
-        pcd_alpha_shape = pcd.alpha.shape
-        print(f"[DEBUG] PCD alpha shape: {pcd_alpha_shape}")
+        self.num_splats_per_triangle = pcd.num_splats_per_triangle # [YC] add
         
         alpha_point_cloud = pcd.alpha.float().cuda()
         scale = torch.ones((pcd.points.shape[0], 1)).float().cuda()
@@ -454,7 +451,8 @@ class LMGModel(GaussianModel):
         self.prepare_scaling_rot()
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-
+   
+    
     def _calc_xyz(self):
         """
         calculate the 3d Gaussian center in the coordinates xyz.
@@ -587,7 +585,8 @@ class LMGModel(GaussianModel):
         additional_attrs = [
             '_alpha', 
             '_scale',
-            'triangle_indices'
+            'triangle_indices',
+            'num_splats_per_triangle'
         ]
 
         save_dict = {}
@@ -597,60 +596,24 @@ class LMGModel(GaussianModel):
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         torch.save(save_dict, path_model)
 
-    def load_ply(self, path):
-        # print(f"[DEBUG] Loading GaussianMeshModel from ply file: {path}...")
-        # Load from ply file
-        self._load_ply(path)
-        
-        # Load from pt file
-        path_model = path.replace('point_cloud.ply', 'model_params.pt')
-        params = torch.load(path_model)
-        alpha = params['_alpha']
-        scale = params['_scale']
-        
-        # ---------------------------------------------------------------------------- #
-        #       "vertices", "triangles", "faces" cab be loaded from texture mesh       #
-        # ---------------------------------------------------------------------------- #
-        import trimesh
-        mesh_scene = trimesh.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply", force='mesh')
-        mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-            angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-        ))
-        # --------------------------------- VERTICES --------------------------------- #
-        # print("[DEBUG] Loaded vertices from mesh")
-        vertices = mesh_scene.vertices
-        # >>>> transform_vertices_function()
-        vertices = torch.tensor(vertices[:, [0, 2, 1]])
-        vertices[:, 1] = -vertices[:, 1]
-        vertices *= 1
-        # <<<< transform_vertices_function()
-        vertices = nn.Parameter(
-            vertices.clone().detach().requires_grad_(True).cuda().float()
-        )
-        self.vertices = vertices
-        # ----------------------------------- FACES ---------------------------------- #
-        # print("[DEBUG] Loaded faces from mesh")
-        faces = mesh_scene.faces
-        faces = torch.tensor(faces).cuda()
-        self.faces = faces
-        # --------------------------------- TRIANGLES -------------------------------- #
-        # print("[DEBUG] Loaded triangles from mesh")
-        triangles = vertices[torch.tensor(mesh_scene.faces).long()].float().cuda()
-        self.triangles = triangles
-
-        self._alpha = nn.Parameter(alpha)
-        self._scale = nn.Parameter(scale)
-
     def load_lmg_gs(self, path, vertices, faces):
         self._load_lmg_ply(path)
         
         # Load from pt file
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         params = torch.load(path_model)
-        print("[DEBUG] param keys:", params.keys())
+
         alpha = params['_alpha']
         scale = params['_scale']
-        triangle_indices = params['triangle_indices']
+        
+        if "triangle_indices" in params:
+            print("[DEBUG] Loaded triangle_indices from ['triangle_indices'] file.")
+            triangle_indices = params['triangle_indices']
+        else:
+            print("[DEBUG] Loaded triangle_indices from ['point_cloud'].triangle_indices.")
+            triangle_indices = params['point_cloud'].triangle_indices
+        
+        num_splats_per_triangle = params['num_splats_per_triangle']
         
         # --------------------------------- VERTICES --------------------------------- #
         self.vertices = nn.Parameter(
@@ -664,6 +627,10 @@ class LMGModel(GaussianModel):
         self._alpha = nn.Parameter(alpha)
         self._scale = nn.Parameter(scale)
         self.triangle_indices = triangle_indices
+        self.num_splats_per_triangle = num_splats_per_triangle
+        
+        self.update_alpha()
+        self.prepare_scaling_rot()
 
     def _load_lmg_ply(self, path):
         plydata = PlyData.read(path)
