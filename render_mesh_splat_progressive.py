@@ -10,7 +10,7 @@
 #
 
 import torch
-from scene import Scene
+from scene import Scene, SceneSimple
 import os
 from tqdm import tqdm
 from os import makedirs
@@ -23,7 +23,7 @@ from renderer.mesh_splat_renderer import render # [YC] change to mesh_splat_rend
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
-from games import gaussianModelRender
+from games import gaussianModelRender, gaussianModel
 
 from pytorch3d.io import load_objs_as_meshes
 import trimesh
@@ -198,7 +198,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
                             bg_color=pure_bg, bg_depth=pure_bg_depth)["render"]
             print("\033[94m [INFO] Render::GS using pure GS rasterizer\033[0m")
             
-        elif gs_type == "gs_mesh":
+        elif gs_type == "gs_mesh" or gs_type == "lmg":
             # [NOTE] ensure that during rendering we use the same rasterizer as in training
             if occlusion:
                 rendering = render(view, gaussians, pipeline, 
@@ -248,55 +248,38 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline :
                 occlusion: bool = False,
                 policy_path : str = None,
                 precaptured_mesh_img_path : str = None,
-                mesh_rasterizer_type: str = "pytorch3d"
+                mesh_rasterizer_type: str = "pytorch3d",
+                load_gs_path : str = None
                 # <<<< [YC] add
                 ):
     render_timer_start = time.time()
     
     with torch.no_grad():
-        gaussians = gaussianModelRender[gs_type](dataset.sh_degree)
+        gaussians = gaussianModel[gs_type](dataset.sh_degree)
         if mesh_rasterizer_type == "pytorch3d":
             textured_mesh = load_textured_mesh(dataset, texture_obj_path)
         elif mesh_rasterizer_type == "nvdiffrast":
             textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
             
+        scene = SceneSimple(
+            args=dataset, 
+            gaussians=gaussians, 
+            texture_obj_path=texture_obj_path, 
+            gs_path=load_gs_path
+        )
+        
         # [BUG] trace from here to see how ply and policy are loaded
-        scene = Scene(dataset, gaussians, 
-                      load_iteration=iteration, shuffle=False,
-                      policy_path=policy_path,
-                      texture_obj_path=texture_obj_path,
-                      textured_mesh=textured_mesh
-                      )
-        # print("[DEBUG] alpha:", gaussians._alpha[:5])
-        # print("[DEBUG] xyz:", gaussians._xyz[:5])
-        # gaussians._xyz = torch.empty(0) # [DEBUG]
         if hasattr(gaussians, 'update_alpha'): 
-            # print("[DEBUG] xyz:", gaussians._xyz)
             gaussians.update_alpha() # [NOTE] replace xyz
-            # print("[DEBUG] xyz:", gaussians._xyz[:5])
-            # print("[DEBUG] alpha:", gaussians.alpha[:5])
         if hasattr(gaussians, 'prepare_vertices'): 
             gaussians.prepare_vertices() # [NOTE] didn't run this code
         if hasattr(gaussians, 'prepare_scaling_rot'): 
-            # print("[--> DEBUG] Preparing scaling and rotation for gaussians...")
-            # print("[--> DEBUG] scale:", gaussians._scale[5:10])
-            # print("[--> DEBUG] rotation:", gaussians._rotation[5:10])
-            # gaussians._rotation = torch.empty(0) # [DEBUG]
-            # print("[--> DEBUG] _rotation:", gaussians._rotation)
             gaussians.prepare_scaling_rot() # [NOTE] replace rotation and update scale
-            # print("[--> DEBUG] _rotation:", gaussians._rotation[5:10])
-
+        
         mesh_type = dataset.mesh_type if hasattr(dataset, 'mesh_type') else "sugar"
         print(f"[INFO] Render:: Using mesh type: {mesh_type}")
         
         # exit()
-        
-        # if mesh_type == "colmap":
-        #     bg_color = [0,0,0] 
-        #     print(f"[WARNING] Render:: overriding background color to black for colmap mesh type!")
-        # else:
-        #     print(f"[INFO] Render:: bg:{bg_color} for mesh type: {mesh_type}")
-        
         
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -361,6 +344,7 @@ if __name__ == "__main__":
     parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
                         help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
     
+    parser.add_argument("--load_gs_path", type=str, default=None, help="optional path to load pre-trained Gaussian splatting model for rendering")
     
     args = get_combined_args(parser) # get args from both command line and stored file
     model.gs_type = args.gs_type
@@ -385,66 +369,58 @@ if __name__ == "__main__":
                 occlusion=args.occlusion,
                 policy_path=args.policy_path,
                 precaptured_mesh_img_path=args.precaptured_mesh_img_path,
-                mesh_rasterizer_type=args.mesh_rasterizer_type
+                mesh_rasterizer_type=args.mesh_rasterizer_type,
+                load_gs_path=args.load_gs_path
                 # <<<< [YC] add
                 )
     
 """
-python render_mesh_splat_dynamic.py \
--m ./output/sample_exp/hotdog/distortion_100_occlusion \
---gs_type gs_mesh \
+python render_mesh_splat_progressive.py \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive/hotdog/distortion_progressive_40000_occlusion/iteration_0 \
+--gs_type lmg \
 --skip_train \
 --occlusion \
---total_splats 100 \
+--total_splats 40000 \
 --alloc_policy distortion \
 --texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
 --policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
---iteration 500 \
---mesh_rasterizer_type nvdiffrast
+--iteration 15000 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive/hotdog/distortion_progressive_40000_occlusion/iteration_0/point_cloud/iteration_15000/point_cloud.ply
+"""
 
-python render_mesh_splat_dynamic.py \
--m ./output/sample_exp/hotdog/distortion_100_occlusion \
---gs_type gs_mesh \
+"""
+python render_mesh_splat_progressive.py \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_45000 \
+--gs_type lmg \
 --skip_train \
 --occlusion \
---total_splats 100 \
+--total_splats 10000 \
 --alloc_policy distortion \
 --texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
 --policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
---iteration 1000 \
---mesh_rasterizer_type nvdiffrast
+--iteration 60000 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_45000/point_cloud/iteration_60000/point_cloud.ply
 """
 
 """
-python render_mesh_splat_dynamic.py \
--m ./output/sample_exp/hotdog/distortion_5000_occlusion \
---gs_type gs_mesh \
+python render_mesh_splat_progressive.py \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive_dynamic_alpha/hotdog/distortion_progressive_40000_occlusion/iteration_0 \
+--gs_type lmg \
 --skip_train \
 --occlusion \
---total_splats 5000 \
+--total_splats 40000 \
 --alloc_policy distortion \
 --texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
---policy_path ./output/sample_exp/hotdog/distortion_5000_occlusion/distortion_5000.npy \
---iteration 0 \
---mesh_rasterizer_type nvdiffrast
-
-python render_mesh_splat_dynamic.py \
--m ./output/sample_exp/hotdog/distortion_5000_occlusion \
---gs_type gs_mesh \
---skip_train \
---occlusion \
---total_splats 5000 \
---alloc_policy distortion \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
---mesh_type milo \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
---policy_path ./output/sample_exp/hotdog/distortion_5000_occlusion/distortion_5000.npy \
---iteration 1000 \
---mesh_rasterizer_type nvdiffrast
+--policy_path ./output/sample_exp/hotdog/distortion_100_occlusion/distortion_100.npy \
+--iteration 15000 \
+--mesh_rasterizer_type nvdiffrast \
+--load_gs_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive_dynamic_alpha/hotdog/distortion_progressive_40000_occlusion/iteration_0/point_cloud/iteration_15000/point_cloud.ply
 """

@@ -9,11 +9,13 @@ export CUDA_VISIBLE_DEVICES=0
 
 # ======= Config ======
 
+PROGRESSIVE_ROUND="4"
+
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
 # BUDGETS=(16000)
-BUDGETS=(100)
+BUDGETS=(10000)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion")
 POLICIES=("distortion_progressive")
@@ -28,7 +30,8 @@ DATASET_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/images" #! Change to your datas
 MESH_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/meshes" #! Change to your mesh path
 
 # ITERATION="15000"
-ITERATION="100"
+ITERATION="15000"
+
 # SAVE_ITERATIONS=("7000") 
 SAVE_ITERATIONS=("7000") # Need to fill in some iterations or it will failed
 
@@ -44,9 +47,7 @@ RESOLUTION="" # or "--resolution 4" for faster debugging
 IS_WHITE_BG="" # set to "--white_background" if the dataset has white background
 
 # DEBUGGING_FREQ="1000"
-DEBUGGING_FREQ="10"
-
-PROGRESSIVE_ROUND="3"
+DEBUGGING_FREQ="1000"
 
 SKIP_LPIPS=true # true or false; set to true to skip lpips computation to save time
 

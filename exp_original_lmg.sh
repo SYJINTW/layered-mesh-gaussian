@@ -12,7 +12,7 @@ export CUDA_VISIBLE_DEVICES=0
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(160000)
+BUDGETS=(40000)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion")
 POLICIES=("distortion_progressive")
@@ -31,7 +31,8 @@ ITERATION="15000"
 # SAVE_ITERATIONS=("7000") 
 SAVE_ITERATIONS=("7000") # Need to fill in some iterations or it will failed
 
-EXP_NAME="non_progressive" #! Change to your experiment name
+# EXP_NAME="non_progressive" #! Change to your experiment name
+EXP_NAME="non_progressive_dynamic_alpha" #! Change to your experiment name
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
 SCENE_NAME_LIST=("hotdog")

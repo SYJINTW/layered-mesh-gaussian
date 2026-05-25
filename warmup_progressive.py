@@ -141,9 +141,6 @@ def warmup(gs_type, dataset, opt, pipe,
     scene.save(load_iter, warmup=True) # save the initialized scene as iteration 0
     
     
-    
-    
-    
     # # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
     # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_0/point_cloud.ply"
     # # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_5000/point_cloud.ply"

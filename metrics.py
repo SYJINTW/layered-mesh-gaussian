@@ -119,3 +119,17 @@ if __name__ == "__main__":
     parser.add_argument('--skip_lpips', action="store_true", help="Skip LPIPS computation to save time")
     args = parser.parse_args()
     evaluate(args.gs_type, args.model_paths, args.skip_lpips)
+
+"""
+python metrics.py \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive/hotdog/distortion_progressive_40000_occlusion/iteration_0 \
+--gs_type lmg \
+--skip_lpips
+"""
+    
+"""
+python metrics.py \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_45000 \
+--gs_type lmg \
+--skip_lpips
+"""
