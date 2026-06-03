@@ -476,22 +476,25 @@ def create_init_point_cloud(
     # We create random points inside the bounds triangles
     xyz_list = []
     alpha_list = []
+    alpha_indices_list = [] # [YC] add
     color_list = []
     tri_indices_list = []
         
     static_alpha = torch.rand(100, 3) # [YC] add
     torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
-        
+    
     # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
     for i in range(triangles.shape[0]):
         n = num_splats_per_triangle[i]
         if n == 0:
             continue
+        
+        alpha_indices = torch.arange(n) # [YC] add
             
         # alpha = torch.rand(n, 3)
         alpha = static_alpha[:n]
         alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
-
+        
         pts = (alpha[:, 0:1] * triangles[i, 0] +
             alpha[:, 1:2] * triangles[i, 1] +
             alpha[:, 2:3] * triangles[i, 2])
@@ -500,6 +503,7 @@ def create_init_point_cloud(
         
         xyz_list.append(pts)
         alpha_list.append(alpha)
+        alpha_indices_list.append(alpha_indices) # [YC] add
         color_list.append(color)
         tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
 
@@ -518,13 +522,18 @@ def create_init_point_cloud(
     xyz = xyz.reshape(num_pts, 3)
     
     alpha = torch.cat(alpha_list, dim=0)
+    alpha_indices = torch.cat(alpha_indices_list, dim=0) # [YC] add
     
     colors = np.concatenate(color_list, axis=0)
     
     tri_indices = torch.cat(tri_indices_list, dim=0)        
-        
+    
+    # Generate dummy prev_num_splats_per_triangle for the first iteration, which will be updated in the next iterations
+    prev_num_splats_per_triangle = np.zeros_like(num_splats_per_triangle)
+    
     pcd = MeshPointCloud(
         alpha=alpha,
+        alpha_indices=alpha_indices, # [YC] add
         points=xyz,
         colors=colors/255.0,
         normals=np.zeros((num_pts, 3)),
@@ -533,7 +542,8 @@ def create_init_point_cloud(
         transform_vertices_function=transform_vertices_function,
         triangles=triangles.cuda(),
         triangle_indices=tri_indices,
-        num_splats_per_triangle=num_splats_per_triangle
+        num_splats_per_triangle=num_splats_per_triangle,
+        prev_num_splats_per_triangle=prev_num_splats_per_triangle, # [YC] add
     )
     
     print("Created MeshPointCloud with", pcd.points.shape[0], "points.")
@@ -548,27 +558,32 @@ def create_init_point_cloud(
 def create_delta_point_cloud(
     model_path,
     triangles, faces, vertices,
+    existing_num_splats_per_triangle,
     num_splats_per_triangle,
     tri_avg_colors,
-    existing_num_splats_per_triangle
+    alpha_path
 ):
     # We create random points inside the bounds triangles
     xyz_list = []
     alpha_list = []
+    alpha_indices_list = [] # [YC] add
     color_list = []
     tri_indices_list = []
         
-    static_alpha = torch.rand(100, 3) # [YC] add
+    static_alpha = torch.load(alpha_path) # [YC] add
     torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
-        
+    
     # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
     for i in range(triangles.shape[0]):
+        existed_n = existing_num_splats_per_triangle[i]
         n = num_splats_per_triangle[i]
         if n == 0:
             continue
-            
+        
+        alpha_indices = torch.arange(existed_n, existed_n+n) # [YC] add
+        
         # alpha = torch.rand(n, 3)
-        alpha = static_alpha[:n]
+        alpha = static_alpha[existed_n:existed_n+n]
         alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
 
         pts = (alpha[:, 0:1] * triangles[i, 0] +
@@ -579,6 +594,7 @@ def create_delta_point_cloud(
         
         xyz_list.append(pts)
         alpha_list.append(alpha)
+        alpha_indices_list.append(alpha_indices) # [YC] add
         color_list.append(color)
         tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
  
@@ -591,18 +607,23 @@ def create_delta_point_cloud(
         raise RuntimeError("Failed to generate random points inside triangles")
         
     num_pts = num_splats_per_triangle.sum()
-       
+    # print(f"[DEBUG] Total number of points: {num_pts}")
+    
     xyz = torch.cat(xyz_list, dim=0)
     xyz = xyz.reshape(num_pts, 3)
     
     alpha = torch.cat(alpha_list, dim=0)
+    alpha_indices = torch.cat(alpha_indices_list, dim=0) # [YC] add
     
     colors = np.concatenate(color_list, axis=0)
     
     tri_indices = torch.cat(tri_indices_list, dim=0)        
-        
+    
+    prev_num_splats_per_triangle = existing_num_splats_per_triangle
+     
     pcd = MeshPointCloud(
         alpha=alpha,
+        alpha_indices=alpha_indices, # [YC] add
         points=xyz,
         colors=colors/255.0,
         normals=np.zeros((num_pts, 3)),
@@ -611,7 +632,8 @@ def create_delta_point_cloud(
         transform_vertices_function=transform_vertices_function,
         triangles=triangles.cuda(),
         triangle_indices=tri_indices,
-        num_splats_per_triangle=num_splats_per_triangle
+        num_splats_per_triangle=num_splats_per_triangle,
+        prev_num_splats_per_triangle=prev_num_splats_per_triangle, # [YC] add
     )
     
     print("Created MeshPointCloud with", pcd.points.shape[0], "points.")

@@ -44,11 +44,12 @@ import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
 import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
 
 # >>>> [YC] add
-from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud
+from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud, create_delta_point_cloud
 # <<<< [YC] add
 
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
+
 
 def get_tri_avg_colors(mesh_scene):
     vertex_colors = mesh_scene.visual.vertex_colors[:, :3]
@@ -68,7 +69,8 @@ def warmup(gs_type, dataset, opt, pipe,
             precaptured_mesh_img_path,
             mesh_rasterizer_type="pytorch3d",
             load_iter=0,
-            gs_path=None
+            gs_path=None,
+            alpha_path=None
             # <<<< [YC] add
             ):
     # --------------------------- Warm Up Stage -------------------------- #
@@ -118,25 +120,107 @@ def warmup(gs_type, dataset, opt, pipe,
                 debugging=False,
                 load_iter=load_iter
             )
-       
+    
+    import matplotlib.pyplot as plt
+    unique_values, counts = np.unique(num_splats_per_triangle, return_counts=True)
+    sort_indices = np.argsort(counts)[::-1]
+    sorted_values = unique_values[sort_indices]
+    sorted_counts = counts[sort_indices]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar([str(v) for v in sorted_values], sorted_counts, color='skyblue', edgecolor='black')
+    ax.set_title('Frequency of Splats per Triangle (Sorted by Count)')
+    ax.set_xlabel('Number of Splats')
+    ax.set_ylabel('Number of Triangles')
+    ax.bar_label(bars)  # Add exact count values on top of each bar
+    plt.tight_layout()
+    plt.savefig('splats_frequency_plot.png', dpi=300)
+    plt.close()
     print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
+    print(f"[INFO] num_splats_per_triangle max min: {num_splats_per_triangle.max()} {num_splats_per_triangle.min()}")
     print(f"[INFO] Total number of splats allocated: {num_splats_per_triangle.sum()}")
     
-    if load_iter > 0:
-        num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
+    # if load_iter > 0:
+    #     num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
     
     tri_avg_colors = get_tri_avg_colors(scene.mesh_scene) 
     
-    pcd = create_init_point_cloud(
-        model_path=dataset.model_path,
-        triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
-        num_splats_per_triangle=num_splats_per_triangle,
-        tri_avg_colors=tri_avg_colors,
-    )
-    
-    gaussians.create_from_pcd(pcd, scene.cameras_extent)
-    
-    scene.gaussians = gaussians 
+    if gs_path == None:
+        # First warmup
+        pcd = create_init_point_cloud(
+            model_path=dataset.model_path,
+            triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+            num_splats_per_triangle=num_splats_per_triangle,
+            tri_avg_colors=tri_avg_colors,
+        )
+        gaussians.create_from_pcd(pcd, scene.cameras_extent)
+        scene.gaussians = gaussians
+    else:
+        # Second warmup (progressive warmup)
+        # scene.gaussians will not be None
+        foundation_gaussians = scene.gaussians
+        foundation_num_splats_per_triangle = scene.gaussians.num_splats_per_triangle
+        
+        total_num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
+        
+        total_gaussians = gaussianModel[gs_type](dataset.sh_degree)
+        pcd = create_init_point_cloud(
+            model_path=dataset.model_path,
+            triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+            num_splats_per_triangle=total_num_splats_per_triangle,
+            tri_avg_colors=tri_avg_colors,
+        )
+        total_gaussians.create_from_pcd(pcd, scene.cameras_extent)
+        
+        # Replace color and opacity
+        # foundation:
+        # - foundation_gaussians
+        # - foundation_num_splats_per_triangle
+        # total:
+        # - total_gaussians
+        # - total_num_splats_per_triangle
+        
+        # print(total_gaussians._features_dc.shape)
+        # print(total_gaussians._features_dc[10:20].shape)
+        # print(total_gaussians._features_rest.shape)
+        # print(total_gaussians._opacity.shape)
+        
+        # print(total_num_splats_per_triangle.shape)
+        # print(foundation_num_splats_per_triangle.shape)
+        current_foundation_gs_idx = 0
+        current_total_gs_idx = 0
+        for tri_idx, (num_splats_total, num_splats_foundation) in enumerate(zip(total_num_splats_per_triangle, foundation_num_splats_per_triangle)):
+            if num_splats_foundation == 0:
+                pass
+            else:
+                with torch.no_grad():
+                    # print(tri_idx, num_splats_foundation, current_foundation_gs_idx, current_total_gs_idx)
+                    # print(foundation_gaussians._features_dc[current_foundation_gs_idx:current_foundation_gs_idx+num_splats_foundation].shape)
+                    # print(total_gaussians._features_dc[current_total_gs_idx:current_total_gs_idx+num_splats_foundation].shape)
+                    total_gaussians._features_dc[current_total_gs_idx:current_total_gs_idx+num_splats_foundation] = foundation_gaussians._features_dc[current_foundation_gs_idx:current_foundation_gs_idx+num_splats_foundation]
+                    total_gaussians._features_rest[current_total_gs_idx:current_total_gs_idx+num_splats_foundation] = foundation_gaussians._features_rest[current_foundation_gs_idx:current_foundation_gs_idx+num_splats_foundation]
+                    total_gaussians._opacity[current_total_gs_idx:current_total_gs_idx+num_splats_foundation] = foundation_gaussians._opacity[current_foundation_gs_idx:current_foundation_gs_idx+num_splats_foundation]
+            current_foundation_gs_idx += num_splats_foundation
+            current_total_gs_idx += num_splats_total
+        
+        scene.gaussians = total_gaussians
+        # print(foundation_gaussians.num_splats_per_triangle.sum())
+        # print(total_gaussians.num_splats_per_triangle.sum())
+        
+        # # [TODO] This version is weird
+        # scene.save(0, warmup=False, based=True) # save the initial scene as iteration 0 based on loaded gs
+        # # new_num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
+        # pcd = create_delta_point_cloud(
+        #     model_path=dataset.model_path,
+        #     triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
+        #     existing_num_splats_per_triangle=scene.gaussians.num_splats_per_triangle,
+        #     num_splats_per_triangle=num_splats_per_triangle,
+        #     tri_avg_colors=tri_avg_colors,
+        #     alpha_path=args.alpha_path
+        # )
+        # # print(pcd.triangle_indices)
+        # delta_gaussians = gaussianModel[gs_type](dataset.sh_degree) # [YC] note: nothing changing here
+        # delta_gaussians.create_from_pcd(pcd, scene.cameras_extent)
+        # scene.gaussians = delta_gaussians
     
     scene.save(load_iter, warmup=True) # save the initialized scene as iteration 0
     
@@ -326,6 +410,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--load_iter", type=int, default=-1, help="-1 means not loading and start from scratch")
     parser.add_argument("--gs_path", type=str, default=None, help="path to the pretrained GS model to load for warmup initialization. If provided, will use this GS for warmup initialization instead of creating from point cloud.")
+    parser.add_argument("--alpha_path", type=str, default=None, help="path to the alpha map for warmup initialization.")
     
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
@@ -374,12 +459,14 @@ if __name__ == "__main__":
         precaptured_mesh_img_path=args.precaptured_mesh_img_path,
         mesh_rasterizer_type=args.mesh_rasterizer_type,
         load_iter=args.load_iter,
-        gs_path=args.gs_path
+        gs_path=args.gs_path,
+        alpha_path=args.alpha_path
         # <<<< [YC] add
     )
 
     # All done
     print("\n[INFO] Warmup complete.")
+
 
 #! Initialization
 """

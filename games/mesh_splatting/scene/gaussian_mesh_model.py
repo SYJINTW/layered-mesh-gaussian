@@ -427,7 +427,9 @@ class LMGModel(GaussianModel):
         
         self.triangle_indices = pcd.triangle_indices.cuda() # [YC] add
         self.num_splats_per_triangle = pcd.num_splats_per_triangle # [YC] add
-        
+        self.prev_num_splats_per_triangle = pcd.prev_num_splats_per_triangle # [YC] add
+        self.alpha_indices = pcd.alpha_indices.cuda() # [YC] add
+
         alpha_point_cloud = pcd.alpha.float().cuda()
         scale = torch.ones((pcd.points.shape[0], 1)).float().cuda()
 
@@ -586,7 +588,8 @@ class LMGModel(GaussianModel):
             '_alpha', 
             '_scale',
             'triangle_indices',
-            'num_splats_per_triangle'
+            'num_splats_per_triangle',
+            'alpha_indices' # [YC] add
         ]
 
         save_dict = {}
@@ -596,13 +599,16 @@ class LMGModel(GaussianModel):
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         torch.save(save_dict, path_model)
 
-    def load_lmg_gs(self, path, vertices, faces):
+    def load_lmg_gs(self, path, vertices, faces, alpha_path=None):
         self._load_lmg_ply(path)
         
         # Load from pt file
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         params = torch.load(path_model)
-
+        
+        # # Load static alpha
+        # static_alpha = torch.load(alpha_path)
+        
         alpha = params['_alpha']
         scale = params['_scale']
         
@@ -613,8 +619,9 @@ class LMGModel(GaussianModel):
             print("[DEBUG] Loaded triangle_indices from ['point_cloud'].triangle_indices.")
             triangle_indices = params['point_cloud'].triangle_indices
         
-        num_splats_per_triangle = params['num_splats_per_triangle']
-        
+        num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add
+        alpha_indices = params['alpha_indices'] # [YC] add
+
         # --------------------------------- VERTICES --------------------------------- #
         self.vertices = nn.Parameter(
             vertices.clone().detach().requires_grad_(True).cuda().float()
@@ -627,7 +634,49 @@ class LMGModel(GaussianModel):
         self._alpha = nn.Parameter(alpha)
         self._scale = nn.Parameter(scale)
         self.triangle_indices = triangle_indices
-        self.num_splats_per_triangle = num_splats_per_triangle
+        self.num_splats_per_triangle = num_splats_per_triangle # [YC] add
+        self.alpha_indices = alpha_indices # [YC] add
+        
+        self.update_alpha()
+        self.prepare_scaling_rot()
+    
+    def load_lmg_foundation_gs(self, path, vertices, faces, alpha_path=None):
+        self._load_lmg_foundation_ply(path)
+        
+        # Load from pt file
+        path_model = path.replace('point_cloud.ply', 'model_params.pt')
+        params = torch.load(path_model)
+        
+        # # Load static alpha
+        # static_alpha = torch.load(alpha_path)
+        
+        alpha = params['_alpha']
+        scale = params['_scale']
+        
+        if "triangle_indices" in params:
+            print("[DEBUG] Loaded triangle_indices from ['triangle_indices'] file.")
+            triangle_indices = params['triangle_indices']
+        else:
+            print("[DEBUG] Loaded triangle_indices from ['point_cloud'].triangle_indices.")
+            triangle_indices = params['point_cloud'].triangle_indices
+        
+        num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add
+        alpha_indices = params['alpha_indices'] # [YC] add
+
+        # --------------------------------- VERTICES --------------------------------- #
+        self.vertices = nn.Parameter(
+            vertices.clone().detach().requires_grad_(True).cuda().float()
+        )
+        # ----------------------------------- FACES ---------------------------------- #
+        self.faces = torch.tensor(faces).cuda()
+        # --------------------------------- TRIANGLES -------------------------------- #
+        self.triangles = vertices[torch.tensor(faces).long()].float().cuda()
+
+        self._alpha = nn.Parameter(alpha)
+        self._scale = nn.Parameter(scale)
+        self.triangle_indices = triangle_indices
+        self.num_splats_per_triangle = num_splats_per_triangle # [YC] add
+        self.alpha_indices = alpha_indices # [YC] add
         
         self.update_alpha()
         self.prepare_scaling_rot()
@@ -674,4 +723,47 @@ class LMGModel(GaussianModel):
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True)) #! [YC] comment out for now
 
         self.active_sh_degree = self.max_sh_degree
+    
+    def _load_lmg_foundation_ply(self, path):
+        plydata = PlyData.read(path)
+        
+        num_of_gs = plydata.elements[0].count
+        
+        # Dummy xyz
+        xyz = np.stack((np.zeros(num_of_gs), 
+                        np.zeros(num_of_gs), 
+                        np.zeros(num_of_gs)), axis=1) # dummy xyz, not used for gs_mesh
+        
+        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        features_dc = np.zeros((num_of_gs, 3, 1))
+        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(self.max_sh_degree + 1) ** 2 - 3
+        features_extra = np.zeros((num_of_gs, len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
+
+        # Dummy scale
+        scale_names = [name for name in ["scale_0", "scale_1", "scale_2"]]
+        scales = np.zeros((num_of_gs, len(scale_names)))
+        
+        # Dummy rotations
+        rot_names = [name for name in ["rot_0", "rot_1", "rot_2", "rot_3"]]
+        rots = np.zeros((num_of_gs, len(rot_names)))
+        
+        self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(False)) #! [YC] comment out for now
+        self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(False))
+        self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(False))
+        self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(False))
+        self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(False))
+        self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(False)) #! [YC] comment out for now
+
+        self.active_sh_degree = self.max_sh_degree    
         

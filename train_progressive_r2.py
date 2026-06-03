@@ -79,6 +79,45 @@ import matplotlib.cm as cm
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
 
+num_of_gaussian_list = []
+
+def gs_merge(foundation_gs, train_gs, gs_type):
+    # 1. foundation GS
+    foundation_xyz = foundation_gs._xyz
+    foundation_features_dc = foundation_gs._features_dc
+    foundation_features_rest = foundation_gs._features_rest
+    foundation_scaling = foundation_gs._scaling
+    foundation_rotation = foundation_gs._rotation
+    foundation_opacity = foundation_gs._opacity
+    foundation_vertices = foundation_gs.vertices # [YC] add
+    foundation_alpha = foundation_gs._alpha # [YC] add
+    foundation_scale = foundation_gs._scale # [YC] add
+    
+    # 2. training GS
+    train_xyz = train_gs._xyz
+    train_features_dc = train_gs._features_dc
+    train_features_rest = train_gs._features_rest
+    train_scaling = train_gs._scaling
+    train_rotation = train_gs._rotation
+    train_opacity = train_gs._opacity
+    train_vertices = train_gs.vertices # [YC] add
+    train_alpha = train_gs._alpha # [YC] add
+    train_scale = train_gs._scale # [YC] add
+    
+    # 3. merged GS
+    merged_gaussians = gaussianModel[gs_type](foundation_gs.max_sh_degree)
+    merged_gaussians._xyz = torch.nn.Parameter(torch.cat((foundation_xyz, train_xyz), dim=0))
+    merged_gaussians._features_dc = torch.nn.Parameter(torch.cat((foundation_features_dc, train_features_dc), dim=0))
+    merged_gaussians._features_rest = torch.nn.Parameter(torch.cat((foundation_features_rest, train_features_rest), dim=0))
+    merged_gaussians._scaling = torch.nn.Parameter(torch.cat((foundation_scaling, train_scaling), dim=0))
+    merged_gaussians._rotation = torch.nn.Parameter(torch.cat((foundation_rotation, train_rotation), dim=0))
+    merged_gaussians._opacity = torch.nn.Parameter(torch.cat((foundation_opacity, train_opacity), dim=0))
+    merged_gaussians.max_radii2D = torch.cat((foundation_gs.max_radii2D.clone().detach(), train_gs.max_radii2D.clone().detach()), dim=0)
+    merged_gaussians.vertices = torch.nn.Parameter(torch.cat((foundation_vertices, train_vertices), dim=0)) # [YC] add
+    merged_gaussians._alpha = torch.nn.Parameter(torch.cat((foundation_alpha, train_alpha), dim=0)) # [YC] add
+    merged_gaussians._scale = torch.nn.Parameter(torch.cat((foundation_scale, train_scale), dim=0)) # [YC] add
+    
+    return merged_gaussians
 
 def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
             debug_from, save_xyz,
@@ -107,16 +146,20 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
                         texture_obj_path=texture_obj_path, 
                         gs_path=load_gs_path
                         )
-    
-    # if based_gs_path is not None:
-    #     foundation_gs = gaussianModel[gs_type](dataset.sh_degree)
-    #     foundation_gs.load_lmg_gs()
-    
-    #! [YC] note: main changing point is here
     gaussians.training_setup(opt)
-    if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        gaussians.restore(model_params, opt)
+    
+    foundation_gs = gaussianModel[gs_type](dataset.sh_degree)
+    foundation_gs.load_lmg_gs(based_gs_path, scene.vertices, scene.faces)
+    
+    num_of_gaussian_list = [foundation_gs._xyz.shape[0], gaussians._xyz.shape[0]]
+    print(num_of_gaussian_list)
+    gaussians = gs_merge(foundation_gs, gaussians, gs_type)
+    gaussians.training_setup(opt)
+    
+    # [YC] Checkpoint is not supported
+    # if checkpoint:
+    #     (model_params, first_iter) = torch.load(checkpoint)
+    #     gaussians.restore(model_params, opt)
 
     if debugging:
         check_path = Path(scene.model_path) / "debugging" / "training_check"

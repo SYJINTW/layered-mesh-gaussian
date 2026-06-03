@@ -373,8 +373,10 @@ class SceneSimple(Scene):
             print(f"[INFO] No pretrained gs model found at {gs_path}, creating gs model from pcd for the first time.")
             # self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
     
-    def save(self, iteration, warmup=False):
-        if warmup:
+    def save(self, iteration, warmup=False, based=False):
+        if based:
+            point_cloud_path = os.path.join(self.model_path, "point_cloud/based")
+        elif warmup:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}_warmup".format(iteration))    
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

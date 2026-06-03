@@ -19,6 +19,7 @@ from typing import Optional
 
 class MeshPointCloud(NamedTuple):
     alpha: torch.Tensor
+    alpha_indices: torch.Tensor # [YC] add
     points: torch.Tensor
     colors: np.array
     normals: np.array
@@ -28,3 +29,4 @@ class MeshPointCloud(NamedTuple):
     triangles: torch.Tensor
     triangle_indices: Optional[torch.Tensor] = None # [YC] add
     num_splats_per_triangle: Optional[torch.Tensor] = None # [YC] add
+    prev_num_splats_per_triangle: Optional[torch.Tensor] = None # [YC] add
