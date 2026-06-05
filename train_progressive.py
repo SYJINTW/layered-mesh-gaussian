@@ -79,6 +79,19 @@ import matplotlib.cm as cm
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
 
+def frozen_mask(foundation_num_splats_per_triangle, total_num_splats_per_triangle):
+    idx_list = []
+    current_foundation_gs_idx = 0
+    current_total_gs_idx = 0
+    for tri_idx, (num_splats_total, num_splats_foundation) in enumerate(zip(total_num_splats_per_triangle, foundation_num_splats_per_triangle)):
+        if num_splats_foundation == 0:
+            pass
+        else:
+            with torch.no_grad():
+                idx_list.extend([i for i in range(current_total_gs_idx, current_total_gs_idx+num_splats_foundation)])
+        current_foundation_gs_idx += num_splats_foundation
+        current_total_gs_idx += num_splats_total
+    return idx_list
 
 def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint,
             debug_from, save_xyz,
@@ -89,9 +102,9 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             policy_path,
             precaptured_mesh_img_path,
             mesh_rasterizer_type="pytorch3d",
-            based_gs_path=None,
             load_gs_path=None,
-            start_iteration=0
+            start_iteration=0,
+            foundation_pt_path=None
             # <<<< [YC] add
             ):
     
@@ -144,6 +157,15 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     background_depth_pt_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_depth/r_0.pt"
     background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
 
+    # Trick part
+    if foundation_pt_path is not None:
+        # foundation_pt = torch.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/exp_gs_110_iteration_200/gs_100_iteration_0/point_cloud/iteration_500/model_params.pt")
+        foundation_pt = torch.load(foundation_pt_path)
+        # total_pt = torch.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/exp_gs_110_iteration_200/gs_10_iteration_500/point_cloud/iteration_500_warmup/model_params.pt")
+        frozen_idx_list = frozen_mask(foundation_pt["num_splats_per_triangle"], gaussians.num_splats_per_triangle)
+        frozen_idx_list = torch.tensor(frozen_idx_list, dtype=torch.long, device="cuda")
+        # print(frozen_idx_list)
+        gaussians.setup_frozen_mask(frozen_idx_list)
     
     # ---------------------------------------------------------------------------- #
     #                              Start Training Loop                             #
@@ -554,6 +576,7 @@ if __name__ == "__main__":
     parser.add_argument("--based_gs_path", type=str, default=None, help="")
     parser.add_argument("--load_gs_path", type=str, default=None, help="path to the pretrained GS model to load for training initialization")
     parser.add_argument("--start_iteration", type=int, default=0, help="iteration number to start training from, used together with --load_gs_path")
+    parser.add_argument("--foundation_pt_path", type=str, help="path to the foundation model's .pt file, used for computing frozen mask for progressive training")
     
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
@@ -598,9 +621,9 @@ if __name__ == "__main__":
         policy_path=args.policy_path,
         precaptured_mesh_img_path=args.precaptured_mesh_img_path,
         mesh_rasterizer_type=args.mesh_rasterizer_type,
-        based_gs_path=args.based_gs_path,
         load_gs_path=args.load_gs_path,
-        start_iteration=args.start_iteration
+        start_iteration=args.start_iteration,
+        foundation_pt_path=args.foundation_pt_path
         # <<<< [YC] add
     )
 

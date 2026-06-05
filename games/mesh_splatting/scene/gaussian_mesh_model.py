@@ -765,5 +765,52 @@ class LMGModel(GaussianModel):
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(False))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(False)) #! [YC] comment out for now
 
-        self.active_sh_degree = self.max_sh_degree    
+        self.active_sh_degree = self.max_sh_degree
+    
+    def setup_frozen_mask(self, frozen_indices):
+        """
+        設定哪些 Gaussians 需要被凍結（在訓練時不更新參數）。
+        參數:
+            frozen_indices (torch.Tensor): 包含需要凍結的索引的 1D Tensor。
+        """
+        # 1. 取得當前的設備與總數量，確保變數都在同一個 GPU 上
+        device = self._xyz.device
+        total_num = self._xyz.shape[0]
+        
+        # 確保傳入的 index 也在正確的 device 上
+        frozen_indices = frozen_indices.to(device)
+
+        # 2. 建立 Boolean Mask (預設全為 False，代表都要訓練)
+        self.frozen_mask = torch.zeros(total_num, dtype=torch.bool, device=device)
+        
+        # 將名單上的點設為 True (代表要凍結)
+        self.frozen_mask[frozen_indices] = True
+
+        # 3. 定義攔截梯度的 Hook 函數
+        def freeze_hook(grad):
+            # 為了避免 PyTorch 抱怨 in-place 修改破壞計算圖，我們 clone 一份梯度
+            new_grad = grad.clone()
+            # 將 mask 為 True 的位置，梯度強行歸零
+            new_grad[self.frozen_mask] = 0.0
+            return new_grad
+
+        # 4. 將 Hook 註冊到所有 3DGS 的核心參數上
+        # 配合你的 training_setup，更新需要綁定 Hook 的參數名單
+        parameters_to_freeze = [
+            # 'vertices',       # 修改這裡 (對應原本的 _xyz)
+            '_alpha',         # 修改這裡 (對應原本的 _rotation 或其他特徵)
+            '_features_dc', 
+            '_features_rest', 
+            '_opacity', 
+            '_scale'          # 修改這裡 (對應原本的 _scaling)
+        ]
+
+        for param_name in parameters_to_freeze:
+            if hasattr(self, param_name):
+                param = getattr(self, param_name)
+                # 確保該變數存在，且真的有在計算梯度才掛上 Hook
+                if param is not None and param.requires_grad:
+                    param.register_hook(freeze_hook)
+                    
+        print(f"[Info] 成功凍結了 {len(frozen_indices)} / {total_num} 個 Gaussians！")  
         
