@@ -242,7 +242,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
         # break
         
 # sets are {train,test, (val)}
-def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,
+def render_sets(gs_type: str, dataset : ModelParams, iteration : int, 
+                pipeline : PipelineParams, skip_train : bool, skip_test : bool,
                 # >>>> [YC] add
                 texture_obj_path : str = None,
                 occlusion: bool = False,
@@ -296,12 +297,12 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline :
         }
 
         if not skip_train:
-            render_set(gs_type, dataset.model_path, "train", scene.loaded_iter, 
+            render_set(gs_type, dataset.model_path, "train", iteration, 
                   scene.getTrainCameras(), gaussians, pipeline, background,
                   **render_kwargs)
 
         if not skip_test:
-            render_set(gs_type, dataset.model_path, "test", scene.loaded_iter, 
+            render_set(gs_type, dataset.model_path, "test", iteration, 
                   scene.getTestCameras(), gaussians, pipeline, background,
                   **render_kwargs)
 
@@ -376,7 +377,7 @@ if __name__ == "__main__":
     
 """
 python render_mesh_splat_progressive.py \
--m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/non_progressive/hotdog/distortion_progressive_40000_occlusion/iteration_0 \
+-m /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/distortion_progressive_16000_occlusion/iteration_0 \
 --gs_type lmg \
 --skip_train \
 --occlusion \

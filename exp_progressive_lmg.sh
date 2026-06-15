@@ -14,7 +14,7 @@ PROGRESSIVE_ROUND="4"
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(16000)
+BUDGETS=(8000)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion")
 POLICIES=("distortion_progressive")
@@ -106,148 +106,165 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     # Ensure the save directory exists
                     mkdir -p "$SAVE_DIR"
                     
+                    # For the first round, we start with the original policy without loading from previous iteration
                     if ((ROUND == 1)); then
-                        # For the first round, we start with the original policy without loading from previous iteration
-                        # ======= Step 0: Warmup ======
-                        echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
-                        if python warmup_progressive.py --eval \
-                            --warmup_only \
-                            -s "$DATASET_DIR" \
-                            -m "$SAVE_DIR" \
-                            --texture_obj_path "$MESH_FILE" \
-                            --mesh_type "$MESH_TYPE" \
-                            --debugging \
-                            --gs_type lmg \
-                            $IS_OCCLUSION \
-                            --total_splats "$budget" \
-                            --alloc_policy "$policy" \
-                            --policy_path "$POLICY_CACHED" \
-                            --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                            --load_iter "${CURRENT_ITERATION}" \
-                            --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                            >> "$LOG_FILE" ; then
-                            # this is warmup
-
-                            warmup_end=$(date +%s)
-                            warmup_secs=$((warmup_end - warmup_start))
-                            echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
-                            exp_status="WARMUP_SUCCESS"
-                        else
-                            warmup_end=$(date +%s)
-                            warmup_secs=$((warmup_end - warmup_start))
-                            exp_status="WARMUP_FAILED"
-                            failed_experiments=$((failed_experiments + 1))
-                            echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                        fi
+                        echo "Starting round ${ROUND}/${PROGRESSIVE_ROUND} for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} from scratch (no loading)..." | tee -a "$LOG_FILE"
+                        # Parameters for warmup
+                        WARMUP_GS_PATH=""
+                        WARMUP_ALPHA_PATH=""
+                        # Parameters for training
+                        TRAINING_FOUNDATION_PT_PATH="" 
                     else
-                        # For subsequent rounds
-                        echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
-                        if python warmup_progressive.py --eval \
-                            --warmup_only \
-                            -s "$DATASET_DIR" \
-                            -m "$SAVE_DIR" \
-                            --texture_obj_path "$MESH_FILE" \
-                            --mesh_type "$MESH_TYPE" \
-                            --debugging \
-                            --gs_type lmg \
-                            $IS_OCCLUSION \
-                            --total_splats "$budget" \
-                            --alloc_policy "$policy" \
-                            --policy_path "$POLICY_CACHED" \
-                            --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                            --load_iter "${CURRENT_ITERATION}" \
-                            --gs_path "${PREV_SAVE_DIR}/point_cloud/iteration_${CURRENT_ITERATION}/point_cloud.ply" \
-                            --alpha_path "${PREV_SAVE_DIR}/static_alpha.pt" \
-                            --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                            >> "$LOG_FILE" ; then
-                            # this is warmup
+                        echo "Starting round ${ROUND}/${PROGRESSIVE_ROUND} for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} loading from iteration ${CURRENT_ITERATION}..." | tee -a "$LOG_FILE"
+                        # Parameters for warmup
+                        WARMUP_GS_PATH="--gs_path ${PREV_SAVE_DIR}/point_cloud/iteration_${CURRENT_ITERATION}/point_cloud.ply"
+                        WARMUP_ALPHA_PATH="--alpha_path ${PREV_SAVE_DIR}/static_alpha.pt"
+                        # Parameters for training
+                        TRAINING_FOUNDATION_PT_PATH="--foundation_pt_path ${PREV_SAVE_DIR}/point_cloud/iteration_${CURRENT_ITERATION}/model_params.pt"
+                    fi
+                    
+                    # ======= Step 0: Warmup ======
+                    echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
+                    if python warmup_progressive.py --eval \
+                        --warmup_only \
+                        -s "$DATASET_DIR" \
+                        -m "$SAVE_DIR" \
+                        --texture_obj_path "$MESH_FILE" \
+                        --mesh_type "$MESH_TYPE" \
+                        --debugging \
+                        --gs_type lmg \
+                        $IS_OCCLUSION \
+                        --total_splats "$budget" \
+                        --alloc_policy "$policy" \
+                        --policy_path "$POLICY_CACHED" \
+                        --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                        --load_iter "${CURRENT_ITERATION}" \
+                        $WARMUP_GS_PATH \
+                        $WARMUP_ALPHA_PATH \
+                        --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                        >> "$LOG_FILE" ; then
+                        # this is warmup
 
-                            warmup_end=$(date +%s)
-                            warmup_secs=$((warmup_end - warmup_start))
-                            echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
-                            exp_status="WARMUP_SUCCESS"
-                        else
-                            warmup_end=$(date +%s)
-                            warmup_secs=$((warmup_end - warmup_start))
-                            exp_status="WARMUP_FAILED"
-                            failed_experiments=$((failed_experiments + 1))
-                            echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                        fi
+                        warmup_end=$(date +%s)
+                        warmup_secs=$((warmup_end - warmup_start))
+                        echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
+                        exp_status="WARMUP_SUCCESS"
+                    else
+                        warmup_end=$(date +%s)
+                        warmup_secs=$((warmup_end - warmup_start))
+                        exp_status="WARMUP_FAILED"
+                        failed_experiments=$((failed_experiments + 1))
+                        echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
                     fi
                     
                     # ======= Step 1: Train ======
                     if [ "$exp_status" = "WARMUP_SUCCESS" ]; then
                         echo "Step 1/3: Running training..." | tee -a "$LOG_FILE"
                         GS_PATH="${SAVE_DIR}/point_cloud/iteration_${CURRENT_ITERATION}_warmup/point_cloud.ply"
-                        if ((ROUND == 1)); then
-                            if python train_progressive.py --eval \
-                                -s "$DATASET_DIR" \
-                                -m "$SAVE_DIR" \
-                                --texture_obj_path "$MESH_FILE" \
-                                --mesh_type "$MESH_TYPE" \
-                                --debugging \
-                                --debug_freq "$DEBUGGING_FREQ" \
-                                $IS_OCCLUSION \
-                                --total_splats "$budget" \
-                                --alloc_policy "$policy" \
-                                --policy_path "$POLICY_CACHED" \
-                                --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                                --gs_type lmg \
-                                $IS_WHITE_BG \
-                                $RESOLUTION \
-                                --iteration "$ITERATION" \
-                                --save_iterations "${SAVE_ITERATIONS[@]}" \
-                                --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                                --load_gs_path "$GS_PATH" \
-                                --start_iteration "${CURRENT_ITERATION}" \
-                                >> "$LOG_FILE"; then
-                                
-                                train_end=$(date +%s)
-                                train_secs=$((train_end - train_start))
-                                echo "Training completed in $(fmt_time $train_secs) (${train_secs}s)." | tee -a "$LOG_FILE"
-                                exp_status="TRAIN_SUCCESS"
-                            else
-                                train_end=$(date +%s)
-                                train_secs=$((train_end - train_start))
-                                exp_status="TRAIN_FAILED"
-                                failed_experiments=$((failed_experiments + 1))
-                                echo "ERROR: Training failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${train_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                            fi
+                        if python train_progressive.py --eval \
+                            -s "$DATASET_DIR" \
+                            -m "$SAVE_DIR" \
+                            --texture_obj_path "$MESH_FILE" \
+                            --mesh_type "$MESH_TYPE" \
+                            --debugging \
+                            --debug_freq "$DEBUGGING_FREQ" \
+                            $IS_OCCLUSION \
+                            --total_splats "$budget" \
+                            --alloc_policy "$policy" \
+                            --policy_path "$POLICY_CACHED" \
+                            --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                            --gs_type lmg \
+                            $IS_WHITE_BG \
+                            $RESOLUTION \
+                            --iteration "$ITERATION" \
+                            --save_iterations "${SAVE_ITERATIONS[@]}" \
+                            --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                            --load_gs_path "$GS_PATH" \
+                            $TRAINING_FOUNDATION_PT_PATH \
+                            --start_iteration "${CURRENT_ITERATION}" \
+                            >> "$LOG_FILE"; then
+                            
+                            train_end=$(date +%s)
+                            train_secs=$((train_end - train_start))
+                            echo "Training completed in $(fmt_time $train_secs) (${train_secs}s)." | tee -a "$LOG_FILE"
+                            exp_status="TRAIN_SUCCESS"
                         else
-                            if python train_progressive.py --eval \
-                                -s "$DATASET_DIR" \
-                                -m "$SAVE_DIR" \
-                                --texture_obj_path "$MESH_FILE" \
-                                --mesh_type "$MESH_TYPE" \
-                                --debugging \
-                                --debug_freq "$DEBUGGING_FREQ" \
-                                $IS_OCCLUSION \
-                                --total_splats "$budget" \
-                                --alloc_policy "$policy" \
-                                --policy_path "$POLICY_CACHED" \
-                                --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                                --gs_type lmg \
-                                $IS_WHITE_BG \
-                                $RESOLUTION \
-                                --iteration "$ITERATION" \
-                                --save_iterations "${SAVE_ITERATIONS[@]}" \
-                                --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                                --load_gs_path "$GS_PATH" \
-                                --foundation_pt_path "${PREV_SAVE_DIR}/point_cloud/iteration_${CURRENT_ITERATION}/model_params.pt" \
-                                --start_iteration "${CURRENT_ITERATION}" \
-                                >> "$LOG_FILE"; then
-                                
-                                train_end=$(date +%s)
-                                train_secs=$((train_end - train_start))
-                                echo "Training completed in $(fmt_time $train_secs) (${train_secs}s)." | tee -a "$LOG_FILE"
-                                exp_status="TRAIN_SUCCESS"
-                            else
-                                train_end=$(date +%s)
-                                train_secs=$((train_end - train_start))
-                                exp_status="TRAIN_FAILED"
-                                failed_experiments=$((failed_experiments + 1))
-                                echo "ERROR: Training failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${train_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                            fi
+                            train_end=$(date +%s)
+                            train_secs=$((train_end - train_start))
+                            exp_status="TRAIN_FAILED"
+                            failed_experiments=$((failed_experiments + 1))
+                            echo "ERROR: Training failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${train_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                        fi
+                    fi
+
+                    # ======= Step 2: Render ======
+                    exp_status="TRAIN_SUCCESS"
+                    if [ "$exp_status" = "TRAIN_SUCCESS" ]; then
+                        echo "Step 2/3: Running render (iteration ${iter})..." | tee -a "$LOG_FILE"
+                        render_start=$(date +%s)
+                        RENDER_ITERATION=$((CURRENT_ITERATION + ITERATION))
+                        
+                        python generate_dummy_cfg.py \
+                            -m "$SAVE_DIR"
+
+                        if python render_mesh_splat_progressive.py \
+                            -m "$SAVE_DIR" \
+                            --gs_type lmg \
+                            --skip_train \
+                            $IS_OCCLUSION \
+                            --total_splats "$budget" \
+                            --alloc_policy "$policy" \
+                            --texture_obj_path "$MESH_FILE" \
+                            --mesh_type "$MESH_TYPE" \
+                            --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                            $RESOLUTION \
+                            $IS_WHITE_BG \
+                            --policy_path "$POLICY_CACHED" \
+                            --iteration $RENDER_ITERATION \
+                            --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                            --load_gs_path "${SAVE_DIR}/point_cloud/iteration_${RENDER_ITERATION}/point_cloud.ply" \
+                            >> "$LOG_FILE" ; then
+
+                            render_end=$(date +%s)
+                            render_secs=$((render_end - render_start))
+                            echo "Render (iter ${iter}) completed in $(fmt_time $render_secs) (${render_secs}s)." | tee -a "$LOG_FILE"
+                        else
+                            render_end=$(date +%s)
+                            render_secs=$((render_end - render_start))
+                            render_success=false
+                            failed_experiments=$((failed_experiments + 1))
+                            echo "ERROR: Render failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}, iter=${iter} after ${render_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                        fi
+                    fi
+
+                    # ======= Step 3: Metrics ======
+                    exp_status="RENDER_SUCCESS"
+                    if [ "$exp_status" = "RENDER_SUCCESS" ]; then
+                        echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
+                        metrics_start=$(date +%s)
+                        
+                        if [ "$SKIP_LPIPS" = true ]; then
+                            SKIP_LPIPS_ARG="--skip_lpips"
+                        else
+                            SKIP_LPIPS_ARG=""
+                        fi
+                        
+                        if python metrics.py \
+                            -m "$SAVE_DIR" \
+                            --gs_type lmg \
+                            --skip_lpips
+                            >> "$LOG_FILE"; then
+
+                            metrics_end=$(date +%s)
+                            metrics_secs=$((metrics_end - metrics_start))
+                            echo "Metrics completed in $(fmt_time $metrics_secs) (${metrics_secs}s)." | tee -a "$LOG_FILE"
+                            exp_status="SUCCESS"
+                        else
+                            metrics_end=$(date +%s)
+                            metrics_secs=$((metrics_end - metrics_start))
+                            exp_status="METRICS_FAILED"
+                            failed_experiments=$((failed_experiments + 1))
+                            echo "ERROR: Metrics failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${metrics_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
                         fi
                     fi
 

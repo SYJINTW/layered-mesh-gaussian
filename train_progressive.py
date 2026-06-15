@@ -573,7 +573,6 @@ if __name__ == "__main__":
     parser.add_argument("--mesh_rasterizer_type", type=str, default="pytorch3d", 
                         help="which mesh rasterizer to use: pytorch3d or nvdiffrast") 
     
-    parser.add_argument("--based_gs_path", type=str, default=None, help="")
     parser.add_argument("--load_gs_path", type=str, default=None, help="path to the pretrained GS model to load for training initialization")
     parser.add_argument("--start_iteration", type=int, default=0, help="iteration number to start training from, used together with --load_gs_path")
     parser.add_argument("--foundation_pt_path", type=str, help="path to the foundation model's .pt file, used for computing frozen mask for progressive training")
