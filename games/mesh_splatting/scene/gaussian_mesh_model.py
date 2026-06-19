@@ -203,8 +203,9 @@ class GaussianMeshModel(GaussianModel):
         """
         self.alpha = torch.relu(self._alpha) + 1e-8
         self.alpha = self.alpha / self.alpha.sum(dim=-1, keepdim=True)
-        self.triangles = self.vertices[self.faces]
-        self._calc_xyz()
+        if self.vertices is not None and self.faces is not None:
+            self.triangles = self.vertices[self.faces]
+            self._calc_xyz()
 
     def update_alpha_triangle(self):
         """
@@ -251,22 +252,24 @@ class GaussianMeshModel(GaussianModel):
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         torch.save(save_dict, path_model)
 
-    def load_ply(self, path):
+    def load_ply(self, path, texture_obj_path=None):
         # print(f"[DEBUG] Loading GaussianMeshModel from ply file: {path}...")
         # Load from ply file
         self._load_ply(path)
-        
+
         # Load from pt file
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         params = torch.load(path_model)
         alpha = params['_alpha']
         scale = params['_scale']
-        
+
         # ---------------------------------------------------------------------------- #
         #       "vertices", "triangles", "faces" cab be loaded from texture mesh       #
         # ---------------------------------------------------------------------------- #
+        if texture_obj_path is None:
+            raise ValueError("GaussianMeshModel.load_ply requires texture_obj_path to load the mesh")
         import trimesh
-        mesh_scene = trimesh.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply", force='mesh')
+        mesh_scene = trimesh.load(texture_obj_path, force='mesh')
         mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
             angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
         ))
@@ -552,8 +555,9 @@ class LMGModel(GaussianModel):
         """
         self.alpha = torch.relu(self._alpha) + 1e-8
         self.alpha = self.alpha / self.alpha.sum(dim=-1, keepdim=True)
-        self.triangles = self.vertices[self.faces]
-        self._calc_xyz()
+        if self.vertices is not None and self.faces is not None:
+            self.triangles = self.vertices[self.faces]
+            self._calc_xyz()
 
     def update_alpha_triangle(self):
         """

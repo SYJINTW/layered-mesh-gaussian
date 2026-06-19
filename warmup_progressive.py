@@ -70,7 +70,8 @@ def warmup(gs_type, dataset, opt, pipe,
             mesh_rasterizer_type="pytorch3d",
             load_iter=0,
             gs_path=None,
-            alpha_path=None
+            alpha_path=None,
+            fixed_alpha=False
             # <<<< [YC] add
             ):
     # --------------------------- Warm Up Stage -------------------------- #
@@ -151,6 +152,7 @@ def warmup(gs_type, dataset, opt, pipe,
             triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
             num_splats_per_triangle=num_splats_per_triangle,
             tri_avg_colors=tri_avg_colors,
+            fixed_alpha=fixed_alpha,
         )
         gaussians.create_from_pcd(pcd, scene.cameras_extent)
         scene.gaussians = gaussians
@@ -168,6 +170,7 @@ def warmup(gs_type, dataset, opt, pipe,
             triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
             num_splats_per_triangle=total_num_splats_per_triangle,
             tri_avg_colors=tri_avg_colors,
+            fixed_alpha=fixed_alpha,
         )
         total_gaussians.create_from_pcd(pcd, scene.cameras_extent)
         
@@ -411,6 +414,8 @@ if __name__ == "__main__":
     parser.add_argument("--load_iter", type=int, default=-1, help="-1 means not loading and start from scratch")
     parser.add_argument("--gs_path", type=str, default=None, help="path to the pretrained GS model to load for warmup initialization. If provided, will use this GS for warmup initialization instead of creating from point cloud.")
     parser.add_argument("--alpha_path", type=str, default=None, help="path to the alpha map for warmup initialization.")
+    parser.add_argument("--fixed_alpha", action="store_true", default=False,
+                        help="Use shared static barycentric pool across all triangles (canonical init)")
     
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
@@ -460,7 +465,8 @@ if __name__ == "__main__":
         mesh_rasterizer_type=args.mesh_rasterizer_type,
         load_iter=args.load_iter,
         gs_path=args.gs_path,
-        alpha_path=args.alpha_path
+        alpha_path=args.alpha_path,
+        fixed_alpha=args.fixed_alpha
         # <<<< [YC] add
     )
 

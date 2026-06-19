@@ -471,7 +471,8 @@ def create_init_point_cloud(
     model_path,
     triangles, faces, vertices,
     num_splats_per_triangle,
-    tri_avg_colors
+    tri_avg_colors,
+    fixed_alpha=False
 ):
     # We create random points inside the bounds triangles
     xyz_list = []
@@ -479,22 +480,31 @@ def create_init_point_cloud(
     alpha_indices_list = [] # [YC] add
     color_list = []
     tri_indices_list = []
-        
-    static_alpha = torch.rand(100, 3) # [YC] add
-    torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
-    
+
+    if fixed_alpha:
+        # Shared canonical barycentric pool: triangles with budget n all draw from
+        # the SAME first n rows of static_alpha. Pool sized to max per-triangle budget
+        # (not total_splats) to preserve cross-triangle canonicality.
+        pool_size = int(num_splats_per_triangle.max())
+        assert pool_size > 0
+        static_alpha = torch.rand(pool_size, 3)
+        static_alpha = static_alpha / static_alpha.sum(dim=1, keepdim=True)  # barycentric
+        torch.save(static_alpha, Path(model_path) / 'static_alpha.pt')
+
     # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
     for i in range(triangles.shape[0]):
         n = num_splats_per_triangle[i]
         if n == 0:
             continue
-        
+
         alpha_indices = torch.arange(n) # [YC] add
-            
-        # alpha = torch.rand(n, 3)
-        alpha = static_alpha[:n]
-        alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
-        
+
+        if fixed_alpha:
+            alpha = static_alpha[:n]  # n <= pool_size guaranteed
+        else:
+            alpha = torch.rand(n, 3)
+            alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
+
         pts = (alpha[:, 0:1] * triangles[i, 0] +
             alpha[:, 1:2] * triangles[i, 1] +
             alpha[:, 2:3] * triangles[i, 2])

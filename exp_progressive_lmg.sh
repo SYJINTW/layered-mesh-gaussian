@@ -23,10 +23,13 @@ POLICIES=("distortion_progressive")
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-PROJECT_GLOBAL_PATH="/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian" #! Change to your project path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
+MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
-DATASET_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/images" #! Change to your dataset path
-MESH_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/meshes" #! Change to your mesh path
+# Ablation toggle: shared canonical barycentric pool (true) vs per-triangle random init (false)
+FIXED_ALPHA=true
 
 ITERATION="8000"
 # ITERATION="1000"
@@ -124,8 +127,11 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     fi
                     
                     # ======= Step 0: Warmup ======
+                    FIXED_ALPHA_ARG=""
+                    if [ "$FIXED_ALPHA" = true ]; then FIXED_ALPHA_ARG="--fixed_alpha"; fi
                     echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
                     if python warmup_progressive.py --eval \
+                        $FIXED_ALPHA_ARG \
                         --warmup_only \
                         -s "$DATASET_DIR" \
                         -m "$SAVE_DIR" \

@@ -141,7 +141,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     # [BUG] the background fetched in this part is for network GUI debugger only 
     # (not used by us, and not used by training loop)
     # --------------------------- Load background image -------------------------- #
-    background_image_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_texture/r_0.png"
+    _first_cam = scene.getTrainCameras()[0].image_name
+    background_image_path = str(Path(precaptured_mesh_img_path) / "mesh_texture" / f"{_first_cam}.png")
     img = Image.open(background_image_path).convert("RGB")
     # viewpoint_camera_height = 800
     # viewpoint_camera_width = 800
@@ -154,7 +155,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     background = transform(img).to(torch.float32).cuda()
     
     # ----------------------------- Load depth image ----------------------------- #
-    background_depth_pt_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_depth/r_0.pt"
+    background_depth_pt_path = str(Path(precaptured_mesh_img_path) / "mesh_depth" / f"{_first_cam}.pt")
     background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
 
     # Trick part

@@ -26,7 +26,6 @@ from utils.camera_utils import cameraList_from_camInfos
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
-import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
 
 EPS = 1e-8 # small positive epsilon to avoid divide-by-zero
 
@@ -733,6 +732,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         is_averaging_across_views: bool = True,
         **kwargs
     ):
+        self.mesh_for_render = kwargs.get("mesh_for_render", mesh)  # textured mesh for nvdiffrast
         super().__init__(mesh, **kwargs)
         self.viewpoint_camera_infos = viewpoint_camera_infos
         self.dataset_path = dataset_path
@@ -840,8 +840,8 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         dist_map_all = torch.zeros(num_faces, dtype=torch.float32, device=self.device)
         per_view_debug = [] if self.debugging else None
         
-        # [XXX] Load textured mesh for nvdiffrast rendering
-        nv_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(None, "/mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply")
+        # Textured mesh for nvdiffrast rendering (already loaded at init)
+        nv_mesh = self.mesh_for_render
         
         
         # [TODO] this is not really batch processing, it's still sequential

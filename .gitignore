@@ -1,5 +1,6 @@
 *.py[cod]
 .vscode
+env.local.sh
 output
 build
 diff_rasterization/diff_rast.egg-info

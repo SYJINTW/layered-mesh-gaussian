@@ -21,10 +21,10 @@ POLICIES=("distortion")
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-PROJECT_GLOBAL_PATH="/mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian" #! Change to your project path
-
-DATASET_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/images" #! Change to your dataset path
-MESH_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/meshes" #! Change to your mesh path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
+MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
 # ITERATION="15000"
 ITERATION="15000"
