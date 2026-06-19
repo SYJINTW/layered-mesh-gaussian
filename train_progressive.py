@@ -245,7 +245,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         
         # ------------------------------ Mesh background ----------------------------- #
         if precaptured_mesh_img_path:
-            cached_bg_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
+            cached_bg_path = Path(precaptured_mesh_img_path) / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")
                 img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR)  # (W, H)
@@ -254,7 +254,7 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         # ------------------------------ Mesh depth background ----------------------------- #
         # [TODO] perhaps prefetch everything at the start of training?
         if precaptured_mesh_img_path:
-            cached_bg_depth_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
+            cached_bg_depth_path = Path(precaptured_mesh_img_path) / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
             if cached_bg_depth_path.exists():
                 bg_depth = torch.load(cached_bg_depth_path).unsqueeze(0).to("cuda")
 
