@@ -1,4 +1,4 @@
-*.pyc
+*.py[cod]
 .vscode
 output
 build
@@ -22,3 +22,7 @@ plots/
 dataset
 output_*/
 exp_script_*/
+
+# 
+.github
+.claude

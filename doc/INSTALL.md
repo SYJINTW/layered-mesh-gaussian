@@ -63,14 +63,14 @@ source: [Cuda and PyTorch Setup Guide \| SYJINTW](https://syjintw.github.io/post
 ## 3. Install Dependencies
 
 ```
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ## 4. Setup Submodules
 
 ```
-pip install ./submodules/diff-gaussian-rasterization-lmg
-pip install ./submodules/simple-knn
+python -m pip install ./submodules/diff-gaussian-rasterization-lmg
+python -m pip install ./submodules/simple-knn
 ```
 
 ## 5. Install and Build External Libraries
@@ -82,7 +82,7 @@ mkdir ext
 cd ext
 git clone https://github.com/facebookresearch/pytorch3d.git
 cd pytorch3d
-pip install -e .
+python -m pip install -e .
 ```
 
 ### Nvdiffrast
@@ -91,5 +91,7 @@ pip install -e .
 cd ext
 git clone https://github.com/NVlabs/nvdiffrast.git
 cd nvdiffrast
-pip install -e . --no-build-isolation
+python -m pip install -e . --no-build-isolation
 ```
+
+<!-- [TODO] add command to run the pipeline debug script to make sure the env setup succeeded  -->
