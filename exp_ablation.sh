@@ -54,26 +54,31 @@ run_single() {
     [ -f "$BASE/results_lmg.json" ] && { echo "[skip] $exp/$SCENE_ARG (results exist)"; return; }
     mkdir -p "$BASE"
     local FA=""; [ "$fixed" = true ] && FA="--fixed_alpha"
-    echo "[run] $exp/$SCENE_ARG single-round FINAL=$FINAL fixed_alpha=$fixed" | tee -a "$LOG"
 
-    PY warmup_progressive.py --eval $FA --warmup_only -s "$DATASET_DIR" -m "$BASE" $IMAGES \
-        --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --gs_type lmg $OCC \
-        --total_splats "$FINAL" --alloc_policy "$POLICY" --policy_path "$CACHED" \
-        --precaptured_mesh_img_path "$MESH_IMG_DIR" --load_iter 0 \
-        --mesh_rasterizer_type "$RAST" >> "$LOG" 2>&1 || { echo "[FAIL warmup] $exp/$SCENE_ARG"; return; }
+    # Skip warmup+train if final ckpt already trained (rerun only re-renders).
+    if [ -f "$BASE/point_cloud/iteration_${TOTAL_ITER}/point_cloud.ply" ]; then
+        echo "[reuse-ckpt] $exp/$SCENE_ARG final ckpt exists, re-render only" | tee -a "$LOG"
+    else
+        echo "[run] $exp/$SCENE_ARG single-round FINAL=$FINAL fixed_alpha=$fixed" | tee -a "$LOG"
+        PY warmup_progressive.py --eval $FA --warmup_only -s "$DATASET_DIR" -m "$BASE" $IMAGES \
+            --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --gs_type lmg $OCC \
+            --total_splats "$FINAL" --alloc_policy "$POLICY" --policy_path "$CACHED" \
+            --precaptured_mesh_img_path "$MESH_IMG_DIR" --load_iter 0 \
+            --mesh_rasterizer_type "$RAST" >> "$LOG" 2>&1 || { echo "[FAIL warmup] $exp/$SCENE_ARG"; return; }
 
-    PY train_progressive.py --eval -s "$DATASET_DIR" -m "$BASE" $IMAGES \
-        --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --debug_freq 1000 $OCC \
-        --total_splats "$FINAL" --alloc_policy "$POLICY" --policy_path "$CACHED" \
-        --precaptured_mesh_img_path "$MESH_IMG_DIR" --gs_type lmg $WBG \
-        --iteration "$TOTAL_ITER" --save_iterations "${SAVE_ITERS[@]}" \
-        --mesh_rasterizer_type "$RAST" \
-        --load_gs_path "$BASE/point_cloud/iteration_0_warmup/point_cloud.ply" \
-        --start_iteration 0 >> "$LOG" 2>&1 || { echo "[FAIL train] $exp/$SCENE_ARG"; return; }
+        PY train_progressive.py --eval -s "$DATASET_DIR" -m "$BASE" $IMAGES \
+            --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --debug_freq 1000 $OCC \
+            --total_splats "$FINAL" --alloc_policy "$POLICY" --policy_path "$CACHED" \
+            --precaptured_mesh_img_path "$MESH_IMG_DIR" --gs_type lmg $WBG \
+            --iteration "$TOTAL_ITER" --save_iterations "${SAVE_ITERS[@]}" \
+            --mesh_rasterizer_type "$RAST" \
+            --load_gs_path "$BASE/point_cloud/iteration_0_warmup/point_cloud.ply" \
+            --start_iteration 0 >> "$LOG" 2>&1 || { echo "[FAIL train] $exp/$SCENE_ARG"; return; }
+    fi
 
-    PY generate_dummy_cfg.py -m "$BASE" >> "$LOG" 2>&1
+    PY generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
     for it in "${SAVE_ITERS[@]}"; do
-        PY render_mesh_splat_progressive.py -m "$BASE" --gs_type lmg --skip_train $OCC \
+        PY render_mesh_splat_progressive.py -s "$DATASET_DIR" -m "$BASE" --gs_type lmg --skip_train $OCC \
             --total_splats "$FINAL" --alloc_policy "$POLICY" --texture_obj_path "$MESH_FILE" \
             --mesh_type milo --precaptured_mesh_img_path "$MESH_IMG_DIR" $WBG $IMAGES \
             --policy_path "$CACHED" --iteration "$it" --mesh_rasterizer_type "$RAST" \
@@ -104,24 +109,29 @@ run_progressive() {
             WALPHA="--alpha_path $PREV/static_alpha.pt"
             FND="--foundation_pt_path $PREV/point_cloud/iteration_${CUR}/model_params.pt"
         fi
-
-        PY warmup_progressive.py --eval $FA --warmup_only -s "$DATASET_DIR" -m "$BASE" $IMAGES \
-            --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --gs_type lmg $OCC \
-            --total_splats "$PERROUND" --alloc_policy "$POLICY" --policy_path "$CACHED" \
-            --precaptured_mesh_img_path "$MESH_IMG_DIR" --load_iter "$CUR" $WGS $WALPHA \
-            --mesh_rasterizer_type "$RAST" >> "$LOG" 2>&1 || { echo "[FAIL warmup R$R] $exp/$SCENE_ARG"; return; }
-
-        PY train_progressive.py --eval -s "$DATASET_DIR" -m "$BASE" $IMAGES \
-            --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --debug_freq 1000 $OCC \
-            --total_splats "$PERROUND" --alloc_policy "$POLICY" --policy_path "$CACHED" \
-            --precaptured_mesh_img_path "$MESH_IMG_DIR" --gs_type lmg $WBG \
-            --iteration "$ITER_PER" --save_iterations "$ITER_PER" --mesh_rasterizer_type "$RAST" \
-            --load_gs_path "$BASE/point_cloud/iteration_${CUR}_warmup/point_cloud.ply" \
-            $FND --start_iteration "$CUR" >> "$LOG" 2>&1 || { echo "[FAIL train R$R] $exp/$SCENE_ARG"; return; }
-
         local RIT=$((CUR + ITER_PER))
-        PY generate_dummy_cfg.py -m "$BASE" >> "$LOG" 2>&1
-        PY render_mesh_splat_progressive.py -m "$BASE" --gs_type lmg --skip_train $OCC \
+
+        # Skip warmup+train for this round if its ckpt already exists (rerun re-renders only).
+        if [ -f "$BASE/point_cloud/iteration_${RIT}/point_cloud.ply" ]; then
+            echo "[reuse-ckpt R$R] $exp/$SCENE_ARG" | tee -a "$LOG"
+        else
+            PY warmup_progressive.py --eval $FA --warmup_only -s "$DATASET_DIR" -m "$BASE" $IMAGES \
+                --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --gs_type lmg $OCC \
+                --total_splats "$PERROUND" --alloc_policy "$POLICY" --policy_path "$CACHED" \
+                --precaptured_mesh_img_path "$MESH_IMG_DIR" --load_iter "$CUR" $WGS $WALPHA \
+                --mesh_rasterizer_type "$RAST" >> "$LOG" 2>&1 || { echo "[FAIL warmup R$R] $exp/$SCENE_ARG"; return; }
+
+            PY train_progressive.py --eval -s "$DATASET_DIR" -m "$BASE" $IMAGES \
+                --texture_obj_path "$MESH_FILE" --mesh_type milo --debugging --debug_freq 1000 $OCC \
+                --total_splats "$PERROUND" --alloc_policy "$POLICY" --policy_path "$CACHED" \
+                --precaptured_mesh_img_path "$MESH_IMG_DIR" --gs_type lmg $WBG \
+                --iteration "$ITER_PER" --save_iterations "$ITER_PER" --mesh_rasterizer_type "$RAST" \
+                --load_gs_path "$BASE/point_cloud/iteration_${CUR}_warmup/point_cloud.ply" \
+                $FND --start_iteration "$CUR" >> "$LOG" 2>&1 || { echo "[FAIL train R$R] $exp/$SCENE_ARG"; return; }
+        fi
+
+        PY generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
+        PY render_mesh_splat_progressive.py -s "$DATASET_DIR" -m "$BASE" --gs_type lmg --skip_train $OCC \
             --total_splats "$PERROUND" --alloc_policy "$POLICY" --texture_obj_path "$MESH_FILE" \
             --mesh_type milo --precaptured_mesh_img_path "$MESH_IMG_DIR" $WBG $IMAGES \
             --policy_path "$CACHED" --iteration "$RIT" --mesh_rasterizer_type "$RAST" \
