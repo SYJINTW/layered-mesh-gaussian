@@ -171,8 +171,8 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
         bg_depth = None
         
         if precaptured_mesh_img_path:
-            cached_bg_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_texture" / f"{view.image_name}.png"
-            cached_bg_depth_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_depth" / f"{view.image_name}.pt"
+            cached_bg_path = Path(precaptured_mesh_img_path) / "test_mesh_texture" / f"{view.image_name}.png"
+            cached_bg_depth_path = Path(precaptured_mesh_img_path) / "test_mesh_depth" / f"{view.image_name}.pt"
             
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")

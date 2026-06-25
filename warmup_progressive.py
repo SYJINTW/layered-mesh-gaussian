@@ -367,7 +367,44 @@ def warmup(gs_type, dataset, opt, pipe,
     #         torch.save(bg_depth, depth_save_path)
             
     #         # print(f"[INFO] Saved precaptured results for [testing] {cam.image_name}")
-          
+
+    # ---------------------- Precapture mesh backgrounds ----------------------- #
+    # Render textured-mesh RGB + depth per camera once, cached for train/render.
+    # Written to the dir names train_progressive / render_mesh_splat_progressive read
+    # (no mesh_rasterizer_type subfolder). Skips cameras already present.
+    if dataset.warmup_only:
+        if not precaptured_mesh_img_path:
+            raise ValueError("precaptured_mesh_img_path must be provided for warmup_only mode")
+
+        if mesh_rasterizer_type == "pytorch3d":
+            scene.textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+        else:
+            scene.textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
+
+        mesh_bg_color = (1, 1, 1) if dataset.white_background else (0, 0, 0)
+
+        def _precapture(cams, tex_dir, depth_dir):
+            tex_dir.mkdir(parents=True, exist_ok=True)
+            depth_dir.mkdir(parents=True, exist_ok=True)
+            for cam in tqdm(cams, desc=f"Precapturing -> {tex_dir.name}", unit="cam"):
+                bg_save = tex_dir / f"{cam.image_name}.png"
+                depth_save = depth_dir / f"{cam.image_name}.pt"
+                if bg_save.exists() and depth_save.exists():
+                    continue
+                render_pkg = render(cam, gaussians, pipe,
+                                    bg_color=None, bg_depth=None,
+                                    textured_mesh=scene.textured_mesh,
+                                    mesh_background_color=mesh_bg_color,
+                                    mesh_rasterizer_type=mesh_rasterizer_type)
+                TF.to_pil_image(render_pkg["bg_color"].detach().clamp(0, 1).cpu()).save(bg_save)
+                torch.save(render_pkg["bg_depth"].detach().cpu(), depth_save)
+
+        root = Path(precaptured_mesh_img_path)
+        print("[INFO] Warmup: precapturing mesh backgrounds...")
+        _precapture(scene.getTrainCameras(), root / "mesh_texture", root / "mesh_depth")
+        _precapture(scene.getTestCameras(), root / "test_mesh_texture", root / "test_mesh_depth")
+        print("[INFO] Warmup: precaptured mesh backgrounds ready.")
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")

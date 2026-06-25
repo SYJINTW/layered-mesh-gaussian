@@ -273,7 +273,8 @@ class SceneSimple(Scene):
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            pass
+            print("[INFO] Found sparse/ dir, assuming Colmap dataset!")
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         #! [YC] XXX
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             #! [YC] XXX
