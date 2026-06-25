@@ -134,7 +134,7 @@ def warmup(gs_type, dataset, opt, pipe,
     ax.set_ylabel('Number of Triangles')
     ax.bar_label(bars)  # Add exact count values on top of each bar
     plt.tight_layout()
-    plt.savefig('splats_frequency_plot.png', dpi=300)
+    plt.savefig(os.path.join(dataset.model_path, 'splats_frequency_plot.png'), dpi=300)
     plt.close()
     print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
     print(f"[INFO] num_splats_per_triangle max min: {num_splats_per_triangle.max()} {num_splats_per_triangle.min()}")

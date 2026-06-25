@@ -207,7 +207,8 @@ class Scene:
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
+                                                           "point_cloud.ply"),
+                                    texture_obj_path=texture_obj_path)
             self.gaussians.point_cloud = scene_info.point_cloud
             if args.gs_type == "gs_mesh": #! [YC] need to be aware of gs_type
                 self.gaussians.triangles = scene_info.point_cloud.triangles

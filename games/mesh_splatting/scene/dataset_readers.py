@@ -358,9 +358,10 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         # We create random points inside the bounds triangles
         xyz_list = []
         alpha_list = []
+        alpha_indices_list = []
         color_list = []
         tri_indices_list = []
-        
+
         static_alpha = torch.rand(100, 3) # [YC] add
         torch.save(static_alpha, 'static_alpha.pt') # [YC] add
         
@@ -383,6 +384,7 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
             
             xyz_list.append(pts)
             alpha_list.append(alpha)
+            alpha_indices_list.append(torch.arange(n))
             color_list.append(color)
             tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
 
@@ -400,7 +402,8 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         xyz = xyz.reshape(num_pts, 3)
         
         alpha = torch.cat(alpha_list, dim=0)
-        
+        alpha_indices = torch.cat(alpha_indices_list, dim=0)
+
         # shs = np.random.random((num_pts, 3)) / 255.0
         colors = np.concatenate(color_list, axis=0)
         print(colors.shape, xyz.shape, alpha.shape) # [YC] debug
@@ -417,6 +420,7 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         
         pcd = MeshPointCloud(
             alpha=alpha,
+            alpha_indices=alpha_indices,
             points=xyz,
             # colors=SH2RGB(shs),
             colors=colors/255.0,

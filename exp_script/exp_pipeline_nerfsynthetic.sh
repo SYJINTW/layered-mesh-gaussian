@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script runs a pipeline of warmup, training, rendering, and metrics for each experiment.
+# This script runs the LMG pipeline of warmup, training, rendering, and metrics for each experiment.
 # It does not exit on the first error, but continues to the next experiment.
 # set -e
 
