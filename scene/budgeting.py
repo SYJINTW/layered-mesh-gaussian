@@ -817,6 +817,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
 
     
     # [DONE] check the heatmap point cloud against the mesh, the coordinates should align
+    @torch.no_grad()
     def _compute_distortion_weights(self) -> np.ndarray:
         """
         Compute per-triangle distortion weights by rendering from all viewpoints.
@@ -1141,6 +1142,7 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
 
     
     # [DONE] check the heatmap point cloud against the mesh, the coordinates should align
+    @torch.no_grad()
     def _compute_distortion_weights(self) -> np.ndarray:
         """
         Compute per-triangle distortion weights by rendering from all viewpoints.

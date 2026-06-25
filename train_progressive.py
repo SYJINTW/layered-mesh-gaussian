@@ -79,6 +79,13 @@ import matplotlib.cm as cm
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
 
+def _lowpass(y, w=200):
+    """Moving-average lowpass for noisy per-iter curves."""
+    from scipy.ndimage import uniform_filter1d
+    if len(y) < 2:
+        return np.asarray(y)
+    return uniform_filter1d(np.asarray(y, dtype=float), size=min(w, len(y)))
+
 def frozen_mask(foundation_num_splats_per_triangle, total_num_splats_per_triangle):
     idx_list = []
     current_foundation_gs_idx = 0
@@ -428,7 +435,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
     # 畫 Loss 圖
     plt.subplot(1, 3, 1)
-    plt.plot(history_iters, history_loss, label='Loss', color='red', alpha=0.8)
+    plt.plot(history_iters, history_loss, color='red', alpha=0.15)
+    plt.plot(history_iters, _lowpass(history_loss), label='Loss (lowpass)', color='red')
     plt.xlabel("Iteration")
     plt.ylabel("Loss")
     plt.title("Training Loss")
@@ -438,7 +446,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
     # 畫 L1 Loss 圖
     plt.subplot(1, 3, 2)
-    plt.plot(history_iters, history_l1, label='L1 Loss', color='blue', alpha=0.8)
+    plt.plot(history_iters, history_l1, color='blue', alpha=0.15)
+    plt.plot(history_iters, _lowpass(history_l1), label='L1 Loss (lowpass)', color='blue')
     plt.xlabel("Iteration")
     plt.ylabel("L1 Loss")
     plt.title("Training L1 Loss")
@@ -448,7 +457,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
     # 畫 SSIM 圖
     plt.subplot(1, 3, 3)
-    plt.plot(history_iters, history_ssim, label='SSIM', color='green', alpha=0.8)
+    plt.plot(history_iters, history_ssim, color='green', alpha=0.15)
+    plt.plot(history_iters, _lowpass(history_ssim), label='SSIM (lowpass)', color='green')
     plt.xlabel("Iteration")
     plt.ylabel("SSIM")
     plt.title("Training SSIM")

@@ -237,8 +237,6 @@ def readColmapSingleMeshSceneInfo(
             policy_path=policy_path,
             total_splats=total_splats,
             budgeting_policy_name=budgeting_policy_name,
-            min_splats_per_tri=min_splats_per_tri,
-            max_splats_per_tri=max_splats_per_tri,
             textured_mesh=textured_mesh,
             mesh_type=mesh_type
             
@@ -287,9 +285,10 @@ def readColmapSingleMeshSceneInfo(
         # We create random points inside the bounds triangles
         xyz_list = []
         alpha_list = []
+        alpha_indices_list = []
         color_list = []
         tri_indices_list = []
-        
+
         # >>>> [SAM] Build point-to-triangle mapping
         for i in range(triangles.shape[0]):
             n = num_splats_per_triangle[i]
@@ -308,6 +307,7 @@ def readColmapSingleMeshSceneInfo(
             
             xyz_list.append(pts)
             alpha_list.append(alpha)
+            alpha_indices_list.append(torch.arange(n))
             color_list.append(color)
             tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
         # <<<< [SAM]
@@ -325,7 +325,8 @@ def readColmapSingleMeshSceneInfo(
         xyz = xyz.reshape(num_pts, 3)
         
         alpha = torch.cat(alpha_list, dim=0)
-        
+        alpha_indices = torch.cat(alpha_indices_list, dim=0)
+
         # shs = np.random.random((num_pts, 3)) / 255.0
         colors = np.concatenate(color_list, axis=0)
         print(colors.shape, xyz.shape, alpha.shape) # [YC] debug
@@ -341,6 +342,7 @@ def readColmapSingleMeshSceneInfo(
         
         pcd = MeshPointCloud(
             alpha=alpha,
+            alpha_indices=alpha_indices,
             points=xyz,
             # colors=SH2RGB(shs),
             colors=colors/255.0,

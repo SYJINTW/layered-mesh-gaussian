@@ -76,26 +76,22 @@ class Scene:
         #               Call dataset reader according to dataset type                  # 
         # ---------------------------------------------------------------------------- #
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            # if args.gs_type == "gs_multi_mesh":
-            #     scene_info = sceneLoadTypeCallbacks["Colmap_Mesh"](
-            #         args.source_path, args.images, args.eval, args.num_splats, args.meshes
-            #     )
-            # # [YC] add gs_mesh type single colmap mesh
-            # # Real world scene (indoor/outdoor) uses this loader
-            # elif args.gs_type == "gs_mesh":
-            #     scene_info = sceneLoadTypeCallbacks["Colmap_Single_Mesh"](
-            #         args.source_path, args.images, args.eval, args.num_splats[0], 
-            #         texture_obj_path=texture_obj_path,
-            #         policy_path=policy_path,
-            #         total_splats=args.total_splats,
-            #         budget_per_tri=args.budget_per_tri,
-            #         budgeting_policy_name=args.alloc_policy,
-            #         mesh_type=args.mesh_type,
-            #         textured_mesh = textured_mesh,
-            #     )
-            # else:
-            #     scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
-            pass
+            # [YC] gs_mesh single colmap mesh — real-world scene (indoor/outdoor) loader.
+            # Re-enabled (was commented in refactor b07e29f2 2026-05-15); reader is intact.
+            if args.gs_type == "gs_mesh":
+                print("[INFO] Found sparse/ dir, assuming Colmap_Single_Mesh dataset!")
+                scene_info = sceneLoadTypeCallbacks["Colmap_Single_Mesh"](
+                    args.source_path, args.images, args.eval, args.num_splats[0],
+                    texture_obj_path=texture_obj_path,
+                    policy_path=policy_path,
+                    total_splats=args.total_splats,
+                    budget_per_tri=args.budget_per_tri,
+                    budgeting_policy_name=args.alloc_policy,
+                    mesh_type=args.mesh_type,
+                    textured_mesh=textured_mesh,
+                )
+            else:
+                raise NotImplementedError(f"Scene (colmap) loader for gs_type {args.gs_type} not implemented")
         #! [YC] XXX
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             #! [YC] XXX
