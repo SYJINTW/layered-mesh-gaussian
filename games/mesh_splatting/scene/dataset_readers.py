@@ -362,8 +362,8 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         color_list = []
         tri_indices_list = []
 
-        static_alpha = torch.rand(100, 3) # [YC] add
-        torch.save(static_alpha, 'static_alpha.pt') # [YC] add
+        # Pool sized to the busiest triangle so static_alpha[:n] never truncates.
+        static_alpha = torch.rand(int(num_splats_per_triangle.max()), 3)
         
         # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
         for i in range(triangles.shape[0]):

@@ -27,13 +27,7 @@ from pytorch3d.structures import Meshes
 import trimesh
 import numpy as np
 import torch
-
-def transform_vertices_function(vertices, c=1):
-    vertices = vertices[:, [0, 2, 1]]
-    vertices[:, 1] = -vertices[:, 1]
-    vertices *= c
-    return vertices
-
+from games.mesh_splatting.scene.dataset_readers import transform_vertices_function
 # <<<< [YC] add
 
 class Scene:
@@ -113,14 +107,8 @@ class Scene:
                     textured_mesh = textured_mesh,
                     preload_gs_path = preload_gs_path
                 )
-            elif args.gs_type == "gs_flame":
-                # print("Found transforms_train.json file, assuming Flame Blender data set!")
-                # scene_info = sceneLoadTypeCallbacks["Blender_FLAME"](args.source_path, args.white_background, args.eval)
-                pass
             else:
-                # print("Found transforms_train.json file, assuming Blender data set!")
-                # scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
-                pass
+                raise NotImplementedError(f"Scene loader for gs_type {args.gs_type} not implemented")
         else:
             assert False, "Could not recognize scene type!"
             
@@ -369,8 +357,7 @@ class SceneSimple(Scene):
             print(f"[INFO] Loaded pretrained gs model from {gs_path} for warm starting.")
         else:
             print(f"[INFO] No pretrained gs model found at {gs_path}, creating gs model from pcd for the first time.")
-            # self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
-    
+
     def save(self, iteration, warmup=False, based=False):
         if based:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/based")

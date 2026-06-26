@@ -229,9 +229,9 @@ def warmup(gs_type, dataset, opt, pipe,
     
     
     # # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_0/point_cloud.ply"
-    # # gs_path = "/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_5000/point_cloud.ply"
-    
+    # gs_path = "<OUTPUT_ROOT>/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_0/point_cloud.ply"
+    # # gs_path = "<OUTPUT_ROOT>/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_5000/point_cloud.ply"
+
     # scene = SceneSimple(args=dataset, 
     #                     gaussians=gaussians, 
     #                     texture_obj_path=texture_obj_path, 
@@ -269,104 +269,7 @@ def warmup(gs_type, dataset, opt, pipe,
     # scene.save(-1) # save the initialized scene as iteration 0
     
     # gaussians.training_setup(opt)
-    
-    
-    # # [TODO] Tricky part, but it is correct
-    # if gs_type == "gs_mesh":
-    #     if mesh_rasterizer_type == "pytorch3d":
-    #         scene.textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
-    #     elif mesh_rasterizer_type == "nvdiffrast":
-    #         scene.textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-    # else:
-    #     scene.textured_mesh = None
-    
-    # if checkpoint:
-    #     (model_params, first_iter) = torch.load(checkpoint)
-    #     gaussians.restore(model_params, opt)
 
-    # if dataset.warmup_only:
-    #     if not precaptured_mesh_img_path:
-    #         raise ValueError("precaptured_mesh_img_path must be provided for warmup_only mode")
-        
-    #     # ------------------------------ Training Camera ----------------------------- #
-    #     # Precapture mesh_bg and mesh_bg_depth in warmup stage
-    #     precaptured_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type /f"mesh_texture"
-    #     precaptured_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / f"mesh_depth"
-        
-    #     # Ensure directories exist
-    #     precaptured_bg_dir.mkdir(parents=True, exist_ok=True)
-    #     precaptured_depth_dir.mkdir(parents=True, exist_ok=True)
-        
-    #     print("[INFO] Warmup stage: Generating precaptured mesh background and depth images...")
-        
-    #     for cam in tqdm(scene.getTrainCameras(), desc="Precapturing training backgrounds", unit="camera"):
-    #         # Generate file paths
-    #         bg_save_path = precaptured_bg_dir / f"{cam.image_name}.png"
-    #         depth_save_path = precaptured_depth_dir / f"{cam.image_name}.pt"
-            
-    #         # Skip if already exists
-    #         if bg_save_path.exists() and depth_save_path.exists():
-    #             print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
-    #             continue
-            
-    #         # Render background and depth
-    #         bg_color = (1,1,1) if dataset.white_background else (0,0,0)
-    #         render_pkg = render(cam, gaussians, pipe, 
-    #                             bg_color=None, bg_depth=None, 
-    #                             textured_mesh=scene.textured_mesh,
-    #                             mesh_background_color=bg_color,
-    #                             mesh_rasterizer_type=mesh_rasterizer_type
-    #                             )
-            
-    #         # Save background image
-    #         bg_image = render_pkg["bg_color"].detach().clamp(0, 1).cpu()
-    #         bg_image_pil = TF.to_pil_image(bg_image)
-    #         bg_image_pil.save(bg_save_path)
-            
-    #         # Save depth image
-    #         bg_depth = render_pkg["bg_depth"].detach().cpu()
-    #         torch.save(bg_depth, depth_save_path)
-            
-    #         # print(f"[INFO] Saved precaptured results for [training] {cam.image_name}")
-        
-    #     # ------------------------------- Testing Camera ------------------------------ #
-    #     precaptured_test_bg_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_texture"
-    #     precaptured_test_depth_dir = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "test_mesh_depth"
-        
-    #     precaptured_test_bg_dir.mkdir(parents=True, exist_ok=True)
-    #     precaptured_test_depth_dir.mkdir(parents=True, exist_ok=True)
-        
-    #     for cam in tqdm(scene.getTestCameras(), desc="Precapturing test backgrounds", unit="camera"):
-    #         bg_save_path = precaptured_test_bg_dir / f"{cam.image_name}.png"
-    #         depth_save_path = precaptured_test_depth_dir / f"{cam.image_name}.pt"
-            
-    #         # Skip if already exists
-    #         if bg_save_path.exists() and depth_save_path.exists():
-    #             print(f"\t[INFO] Skipping {cam.image_name}, already exists.")
-    #             continue
-            
-    #         # [DONE] fix black background issue in precapture stage
-    #         # didn't pass bg=[0,0,0] into the mesh_renderer_pytorch3d()
-    #         # Render background and depth
-            
-    #         bg_color = (1,1,1) if dataset.white_background else (0,0,0)
-    #         render_pkg = render(cam, gaussians, pipe, 
-    #                             bg_color=None, bg_depth=None, 
-    #                             textured_mesh=scene.textured_mesh,
-    #                             mesh_background_color=bg_color,
-    #                             mesh_rasterizer_type=mesh_rasterizer_type
-    #                             )
-            
-    #         # Save background image
-    #         bg_image = render_pkg["bg_color"].detach().clamp(0, 1).cpu()
-    #         bg_image_pil = TF.to_pil_image(bg_image)
-    #         bg_image_pil.save(bg_save_path)
-            
-    #         # Save depth image
-    #         bg_depth = render_pkg["bg_depth"].detach().cpu()
-    #         torch.save(bg_depth, depth_save_path)
-            
-    #         # print(f"[INFO] Saved precaptured results for [testing] {cam.image_name}")
 
     # ---------------------- Precapture mesh backgrounds ----------------------- #
     # Render textured-mesh RGB + depth per camera once, cached for train/render.
@@ -515,16 +418,16 @@ if __name__ == "__main__":
 """
 python warmup_progressive.py --eval \
 --warmup_only \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATASET_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATASET_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging \
 --gs_type lmg \
 --occlusion \
 --total_splats 10000 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/load_iter_0/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATASET_ROOT>/dataset/meshes/hotdog \
 --load_iter 0 \
 --mesh_rasterizer_type nvdiffrast
 """
@@ -533,16 +436,16 @@ python warmup_progressive.py --eval \
 """
 python warmup_progressive.py --eval \
 --warmup_only \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATASET_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATASET_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging \
 --gs_type lmg \
 --occlusion \
 --total_splats 10000 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/load_iter_1000/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATASET_ROOT>/dataset/meshes/hotdog \
 --load_iter 1000 \
 --gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/point_cloud/iteration_1000/point_cloud.ply \
 --mesh_rasterizer_type nvdiffrast
@@ -552,16 +455,16 @@ python warmup_progressive.py --eval \
 """
 python warmup_progressive.py --eval \
 --warmup_only \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATASET_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATASET_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging \
 --gs_type lmg \
 --occlusion \
 --total_splats 10000 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000/load_iter_2000/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATASET_ROOT>/dataset/meshes/hotdog \
 --load_iter 2000 \
 --gs_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/point_cloud/iteration_2000/point_cloud.ply \
 --mesh_rasterizer_type nvdiffrast
@@ -572,16 +475,16 @@ python warmup_progressive.py --eval \
 """
 python warmup_progressive.py --eval \
 --warmup_only \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATASET_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATASET_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging \
 --gs_type lmg \
 --occlusion \
 --total_splats 30000 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0/load_iter_0/distortion_progressive_30000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATASET_ROOT>/dataset/meshes/hotdog \
 --load_iter 0 \
 --mesh_rasterizer_type nvdiffrast
 """

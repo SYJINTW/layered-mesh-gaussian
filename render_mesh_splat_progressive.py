@@ -157,7 +157,9 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(debug_path, exist_ok=True) # [YC] add for debug images
-    
+
+    torch.cuda.reset_peak_memory_stats()
+    _render_t0 = time.time()
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         # >>>> [YC] add for debug images
         if idx % 10 == 0:
@@ -240,7 +242,14 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
         # <<<< [YC] add for debug images
         
         # break
-        
+
+    _render_secs = time.time() - _render_t0
+    _peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+    with open(os.path.join(model_path, f"render_timing_{name}.json"), "w") as _f:
+        json.dump({"render_secs": _render_secs, "peak_vram_mb": _peak_vram_mb,
+                   "n_views": len(views), "iteration": iteration}, _f)
+    print(f"[INFO] render[{name}] secs={_render_secs:.1f} peak_vram_mb={_peak_vram_mb:.0f}")
+
 # sets are {train,test, (val)}
 def render_sets(gs_type: str, dataset : ModelParams, iteration : int, 
                 pipeline : PipelineParams, skip_train : bool, skip_test : bool,

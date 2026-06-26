@@ -204,7 +204,6 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     fi
 
                     # ======= Step 2: Render ======
-                    exp_status="TRAIN_SUCCESS"
                     if [ "$exp_status" = "TRAIN_SUCCESS" ]; then
                         echo "Step 2/3: Running render (iteration ${iter})..." | tee -a "$LOG_FILE"
                         render_start=$(date +%s)
@@ -234,17 +233,17 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                             render_end=$(date +%s)
                             render_secs=$((render_end - render_start))
                             echo "Render (iter ${iter}) completed in $(fmt_time $render_secs) (${render_secs}s)." | tee -a "$LOG_FILE"
+                            exp_status="RENDER_SUCCESS"
                         else
                             render_end=$(date +%s)
                             render_secs=$((render_end - render_start))
-                            render_success=false
+                            exp_status="RENDER_FAILED"
                             failed_experiments=$((failed_experiments + 1))
                             echo "ERROR: Render failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}, iter=${iter} after ${render_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
                         fi
                     fi
 
                     # ======= Step 3: Metrics ======
-                    exp_status="RENDER_SUCCESS"
                     if [ "$exp_status" = "RENDER_SUCCESS" ]; then
                         echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
                         metrics_start=$(date +%s)
@@ -258,7 +257,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                         if python metrics.py \
                             -m "$SAVE_DIR" \
                             --gs_type lmg \
-                            --skip_lpips
+                            $SKIP_LPIPS_ARG \
                             >> "$LOG_FILE"; then
 
                             metrics_end=$(date +%s)
@@ -276,6 +275,9 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
 
                     PREV_SAVE_DIR="$SAVE_DIR"
                     CURRENT_ITERATION=$((CURRENT_ITERATION + ITERATION))
+                    round_total_secs=$((warmup_secs + train_secs + render_secs + metrics_secs))
+                    total_exp_seconds=$((total_exp_seconds + round_total_secs))
+                    printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n" "$policy" "$budget" "$MESH_RASTERIZER_TYPE" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$round_total_secs" "$exp_status" >> "$TIMING_SUMMARY"
                     echo "Completed round ${ROUND}/${PROGRESSIVE_ROUND} for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}. Next iteration starts from ${CURRENT_ITERATION}." | tee -a "$LOG_FILE"
                 done
             done

@@ -14,6 +14,7 @@
 from itertools import count
 import json
 import os
+import time
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
@@ -47,30 +48,6 @@ import torchvision.transforms.functional as TF
 
 import numpy as np
 from pathlib import Path
-
-from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.io import load_ply
-from pytorch3d.renderer import (
-    AmbientLights,
-    RasterizationSettings, 
-    MeshRenderer, 
-    MeshRasterizer,  
-    SoftPhongShader,
-    )
-
-import open3d as o3d
-from pytorch3d.structures import Pointclouds
-from pytorch3d.renderer import (
-    PointsRasterizationSettings,
-    PointsRenderer,
-    PointsRasterizer,
-    AlphaCompositor
-)
-from scene.cameras import convert_camera_from_gs_to_pytorch3d
-from pytorch3d.renderer.blending import BlendParams
-import trimesh
-from pytorch3d.structures import Meshes
-from pytorch3d.renderer import TexturesVertex
 
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -145,31 +122,29 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     print("[INFO] Finished Warm-Up, Start Training..." )
     #  ------------------------Warm Up Done--------------------------- #
     
-    # [BUG] the background fetched in this part is for network GUI debugger only 
-    # (not used by us, and not used by training loop)
+    # This background is for the network GUI debugger only (not used by the training
+    # loop). Guard against missing precapture so training never crashes when the GUI
+    # is disabled / precapture is absent.
     # --------------------------- Load background image -------------------------- #
+    background = None
+    background_depth = None
     _first_cam = scene.getTrainCameras()[0].image_name
-    background_image_path = str(Path(precaptured_mesh_img_path) / "mesh_texture" / f"{_first_cam}.png")
-    img = Image.open(background_image_path).convert("RGB")
-    # viewpoint_camera_height = 800
-    # viewpoint_camera_width = 800
-    viewpoint_camera_height = scene.getTrainCameras()[0].image_height
-    viewpoint_camera_width = scene.getTrainCameras()[0].image_width
-    img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR) # fixed issue, should be (W, H)
-    transform = T.Compose([
-        T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
-    ])
-    background = transform(img).to(torch.float32).cuda()
-    
-    # ----------------------------- Load depth image ----------------------------- #
-    background_depth_pt_path = str(Path(precaptured_mesh_img_path) / "mesh_depth" / f"{_first_cam}.pt")
-    background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
+    background_image_path = Path(precaptured_mesh_img_path) / "mesh_texture" / f"{_first_cam}.png"
+    background_depth_pt_path = Path(precaptured_mesh_img_path) / "mesh_depth" / f"{_first_cam}.pt"
+    if background_image_path.exists() and background_depth_pt_path.exists():
+        img = Image.open(str(background_image_path)).convert("RGB")
+        viewpoint_camera_height = scene.getTrainCameras()[0].image_height
+        viewpoint_camera_width = scene.getTrainCameras()[0].image_width
+        img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR)  # (W, H)
+        transform = T.Compose([
+            T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
+        ])
+        background = transform(img).to(torch.float32).cuda()
+        background_depth = torch.load(str(background_depth_pt_path)).unsqueeze(0)
 
     # Trick part
     if foundation_pt_path is not None:
-        # foundation_pt = torch.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/exp_gs_110_iteration_200/gs_100_iteration_0/point_cloud/iteration_500/model_params.pt")
         foundation_pt = torch.load(foundation_pt_path)
-        # total_pt = torch.load("/mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/output/progressive/hotdog/exp_gs_110_iteration_200/gs_10_iteration_500/point_cloud/iteration_500_warmup/model_params.pt")
         frozen_idx_list = frozen_mask(foundation_pt["num_splats_per_triangle"], gaussians.num_splats_per_triangle)
         frozen_idx_list = torch.tensor(frozen_idx_list, dtype=torch.long, device="cuda")
         # print(frozen_idx_list)
@@ -188,6 +163,29 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
+
+    # Stage timing + peak VRAM instrumentation (written to train_timing.json at the end).
+    torch.cuda.reset_peak_memory_stats()
+    _train_t0 = time.time()
+
+    # Prefetch all precaptured mesh backgrounds + depths once into CPU RAM, killing the
+    # per-iteration disk read + PNG decode that dominated wall time (esp. high-res scenes).
+    # Values are identical to the per-iter load (same resize/ToTensor/torch.load); only the
+    # disk I/O is hoisted out of the loop. Per-iter we just copy the cached tensor to GPU.
+    # ponytail: CPU-resident cache; if RAM is tight for a huge scene, switch to an LRU.
+    bg_cache = {}
+    if precaptured_mesh_img_path:
+        _prefetch_tf = T.Compose([T.ToTensor()])
+        for _cam in scene.getTrainCameras():
+            _tex_path = Path(precaptured_mesh_img_path) / "mesh_texture" / f"{_cam.image_name}.png"
+            _dep_path = Path(precaptured_mesh_img_path) / "mesh_depth" / f"{_cam.image_name}.pt"
+            if _tex_path.exists() and _dep_path.exists():
+                _img = Image.open(_tex_path).convert("RGB").resize(
+                    (_cam.image_width, _cam.image_height), Image.BILINEAR)  # (W, H)
+                _bg_cpu = _prefetch_tf(_img).to(torch.float32)
+                _bg_depth_cpu = torch.load(_dep_path).unsqueeze(0)
+                bg_cache[_cam.image_name] = (_bg_cpu, _bg_depth_cpu)
+
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     
@@ -250,17 +248,20 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
         ])
         
-        # ------------------------------ Mesh background ----------------------------- #
-        if precaptured_mesh_img_path:
+        # ------------------------------ Mesh background (prefetched) ----------------------------- #
+        bg = None
+        bg_depth = None
+        if precaptured_mesh_img_path and viewpoint_cam.image_name in bg_cache:
+            _cbg, _cbg_depth = bg_cache[viewpoint_cam.image_name]
+            bg = _cbg.to("cuda", non_blocking=True)
+            bg_depth = _cbg_depth.to("cuda", non_blocking=True)
+        elif precaptured_mesh_img_path:
+            # Fallback: precapture missing for this cam — original per-iter disk load.
             cached_bg_path = Path(precaptured_mesh_img_path) / "mesh_texture" / f"{viewpoint_cam.image_name}.png"
             if cached_bg_path.exists():
                 img = Image.open(cached_bg_path).convert("RGB")
                 img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR)  # (W, H)
                 bg = transform(img).to(torch.float32).cuda()
-            
-        # ------------------------------ Mesh depth background ----------------------------- #
-        # [TODO] perhaps prefetch everything at the start of training?
-        if precaptured_mesh_img_path:
             cached_bg_depth_path = Path(precaptured_mesh_img_path) / "mesh_depth" / f"{viewpoint_cam.image_name}.pt"
             if cached_bg_depth_path.exists():
                 bg_depth = torch.load(cached_bg_depth_path).unsqueeze(0).to("cuda")
@@ -303,7 +304,6 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         if debugging:
             # ------------------- Change Tensor to PIL.Image for saving ------------------ #
             if iteration % debug_freq == 0:
-                print(f"[DEBUG] Training Iteration {iteration}, viewpoint: {viewpoint_cam.image_name}")
                 # ---------------------------- Ground truth image ---------------------------- #
                 gt_img_to_save = gt_image.detach().clamp(0, 1).cpu()
                 gt_img_pil = TF.to_pil_image(gt_img_to_save)
@@ -429,6 +429,13 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             gaussians.prepare_scaling_rot()
             
     # ================= 迴圈結束，開始畫圖 ================= #
+    _train_secs = time.time() - _train_t0
+    _peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+    with open(f"{scene.model_path}/train_timing.json", "w") as _f:
+        json.dump({"train_secs": _train_secs, "peak_vram_mb": _peak_vram_mb,
+                   "iterations": opt.iterations}, _f)
+    print(f"[INFO] train_secs={_train_secs:.1f} peak_vram_mb={_peak_vram_mb:.0f}")
+
     print("[INFO] Training complete. Generating metrics plots...")
 
     plt.figure(figsize=(18, 5))
@@ -489,58 +496,6 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     print(f"[INFO] Metrics plot saved to: {plot_path}")
     print(f"[INFO] Metrics data saved to: {json_path}")
     
-def load_textured_mesh(dataset, texture_obj_path: str) -> Meshes:
-    """
-    Load a textured 3D mesh from the given path for background rendering.
-    
-    This function loads mesh of SuGaR (.obj) or Colmap (.ply) format (or others, add if needed)
-    and converts it to a PyTorch3D Meshes object on CUDA
-    
-    Args:
-        dataset: Dataset configuration containing mesh_type attribute.
-                Should have mesh_type in ['sugar', 'colmap', ...].
-        texture_obj_path: Path to the mesh file. If empty string, raises AssertionError.
-    Returns:
-        Meshes: A PyTorch3D Meshes object on CUDA
-    Raises:
-        AssertionError: If texture_obj_path is empty or mesh type is unsupported.
-        AssertionError: If file extension doesn't match expected format.
-    """
-    
-    assert texture_obj_path != "", "[ERROR] texture_obj_path cannot be empty"
-    textured_mesh = None
-    mesh_type = dataset.mesh_type
-    if texture_obj_path != "":
-        print("[INFO] Loading textured mesh for background rendering...")
-        
-        if mesh_type == "sugar": # From SuGaR
-            assert texture_obj_path.lower().endswith(".obj"), "[ERROR] SuGaR mesh should be .obj file!"
-            textured_mesh = load_objs_as_meshes([texture_obj_path]).to("cuda")
-             
-        elif mesh_type == "colmap" or mesh_type == "milo": 
-            # From Colmap, download from https://nerfbaselines.github.io/
-            assert texture_obj_path.lower().endswith(".ply"), "[ERROR] Colmap mesh should be .ply file!"
-            mesh_tm = trimesh.load(texture_obj_path, force='mesh', process=False)
-            verts = torch.tensor(mesh_tm.vertices, dtype=torch.float32)
-            faces = torch.tensor(mesh_tm.faces, dtype=torch.int64)
-            colors = torch.tensor(mesh_tm.visual.vertex_colors[:, :3], dtype=torch.float32) / 255.0
-            
-            # Combine into a textured mesh
-            textured_mesh = Meshes(
-                verts=[verts],
-                faces=[faces],
-                textures=TexturesVertex(verts_features=[colors])
-            ).to("cuda")
-        else:
-            print("[ERROR] Unknown/Unsupported mesh type!")        
-            
-    assert textured_mesh is not None, "[ERROR] Textured mesh is not loaded properly!"
-    
-    return textured_mesh
-
-def load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path: str) -> Meshes:
-    return trimesh.load(texture_obj_path, force='mesh')
-
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -644,16 +599,16 @@ if __name__ == "__main__":
 #! First training
 """
 python train_progressive.py --eval \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATA_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATA_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging --debug_freq 100 \
 --occlusion \
 --total_splats 10000 \
 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_0/load_iter_0/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATA_ROOT>/dataset/meshes/hotdog \
 --gs_type lmg \
 --iteration 1000 --save_iterations 500 \
 --mesh_rasterizer_type nvdiffrast \
@@ -663,16 +618,16 @@ python train_progressive.py --eval \
 # 1000 - 2000
 """
 python train_progressive.py --eval \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATA_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATA_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging --debug_freq 100 \
 --occlusion \
 --total_splats 10000 \
 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_1000/load_iter_1000/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATA_ROOT>/dataset/meshes/hotdog \
 --gs_type lmg \
 --iteration 1000 --save_iterations 500 \
 --mesh_rasterizer_type nvdiffrast \
@@ -683,16 +638,16 @@ python train_progressive.py --eval \
 # 2000 - 3000
 """
 python train_progressive.py --eval \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATA_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATA_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging --debug_freq 100 \
 --occlusion \
 --total_splats 10000 \
 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_10000_occlusion/iteration_2000/load_iter_2000/distortion_progressive_10000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATA_ROOT>/dataset/meshes/hotdog \
 --gs_type lmg \
 --iteration 1000 --save_iterations 500 \
 --mesh_rasterizer_type nvdiffrast \
@@ -704,16 +659,16 @@ python train_progressive.py --eval \
 #! Baseline
 """
 python train_progressive.py --eval \
--s /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/images/hotdog \
+-s <DATA_ROOT>/dataset/images/hotdog \
 -m ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0 \
---texture_obj_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog/hotdog.ply \
+--texture_obj_path <DATA_ROOT>/dataset/meshes/hotdog/hotdog.ply \
 --mesh_type milo \
 --debugging --debug_freq 100 \
 --occlusion \
 --total_splats 30000 \
 --alloc_policy distortion_progressive \
 --policy_path ./output/progressive/hotdog/distortion_progressive_30000_occlusion/iteration_0/load_iter_0/distortion_progressive_30000.npy \
---precaptured_mesh_img_path /mnt/data1/syjintw/MMSys26_extension/layered-mesh-gaussian/dataset/meshes/hotdog \
+--precaptured_mesh_img_path <DATA_ROOT>/dataset/meshes/hotdog \
 --gs_type lmg \
 --iteration 3000 --save_iterations 1000 2000 \
 --mesh_rasterizer_type nvdiffrast \

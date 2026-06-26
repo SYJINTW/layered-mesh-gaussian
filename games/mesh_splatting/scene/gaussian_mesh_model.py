@@ -60,8 +60,6 @@ class GaussianMeshModel(GaussianModel):
         
         self.triangle_indices = pcd.triangle_indices.cuda() # [YC] add
         
-        loaded_alpha = torch.load('static_alpha.pt')
-        print(f"[DEBUG] Loaded tensor shape: {loaded_alpha.shape}")
         pcd_alpha_shape = pcd.alpha.shape
         print(f"[DEBUG] PCD alpha shape: {pcd_alpha_shape}")
         

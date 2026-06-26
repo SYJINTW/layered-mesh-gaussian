@@ -3,6 +3,7 @@
 env.local.sh
 /dataset
 output
+static_alpha.pt
 build
 diff_rasterization/diff_rast.egg-info
 diff_rasterization/dist
