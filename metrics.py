@@ -92,9 +92,28 @@ def evaluate(gs_type, model_paths, skip_lpips=False):
                 print("  LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean(), ".5"))
                 print("")
 
+                # Extra provenance/cost fields (additive; existing readers key on PSNR/SSIM/LPIPS).
+                extra = {"n_views": len(renders)}
+                try:
+                    extra["iteration"] = int(str(method).split("_")[-1])
+                except (ValueError, IndexError):
+                    pass
+                ply = os.path.join(scene_dir, "point_cloud", f"iteration_{extra.get('iteration')}", "point_cloud.ply")
+                if os.path.exists(ply):
+                    extra["gs_ply_bytes"] = os.path.getsize(ply)
+                for tj, pfx in [("train_timing.json", "train"), ("render_timing_test.json", "render")]:
+                    tp = os.path.join(scene_dir, tj)
+                    if os.path.exists(tp):
+                        try:
+                            td = json.load(open(tp))
+                            if f"{pfx}_secs" in td: extra[f"{pfx}_secs"] = td[f"{pfx}_secs"]
+                            if "peak_vram_mb" in td: extra[f"{pfx}_peak_vram_mb"] = td["peak_vram_mb"]
+                        except (ValueError, OSError):
+                            pass
                 full_dict[scene_dir][method].update({"SSIM": torch.tensor(ssims).mean().item(),
                                                     "PSNR": torch.tensor(psnrs).mean().item(),
-                                                    "LPIPS": torch.tensor(lpipss).mean().item()})
+                                                    "LPIPS": torch.tensor(lpipss).mean().item(),
+                                                    **extra})
                 per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(torch.tensor(ssims).tolist(), image_names)},
                                                         "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
                                                         "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)}})
