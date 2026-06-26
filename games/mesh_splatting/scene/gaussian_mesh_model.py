@@ -52,8 +52,6 @@ class GaussianMeshModel(GaussianModel):
         return self._xyz
 
     def create_from_pcd(self, pcd: MeshPointCloud, spatial_lr_scale: float):
-        print("[DEBUG] Creating GaussianMeshModel from point cloud...")
-        
         self.point_cloud = pcd
         self.triangles = self.point_cloud.triangles
         self.spatial_lr_scale = spatial_lr_scale
@@ -61,8 +59,7 @@ class GaussianMeshModel(GaussianModel):
         self.triangle_indices = pcd.triangle_indices.cuda() # [YC] add
         
         pcd_alpha_shape = pcd.alpha.shape
-        print(f"[DEBUG] PCD alpha shape: {pcd_alpha_shape}")
-        
+
         print("Number of faces: ", pcd_alpha_shape[0])
         print("Number of points at initialisation in face: ", pcd_alpha_shape[1])
 
@@ -111,8 +108,6 @@ class GaussianMeshModel(GaussianModel):
         #     )
         
         triangle_idx = self.triangles[self.triangle_indices].detach()  # constants
-        print(f"[DEBUG] alpha shape: {self.alpha.shape}")
-        print(f"[DEBUG] triangle_idx shape: {triangle_idx.shape}")
         _xyz = torch.bmm(self.alpha.unsqueeze(1), triangle_idx).squeeze(1)
         self._xyz = _xyz.detach()
         
@@ -378,13 +373,10 @@ class GaussianMeshModel(GaussianModel):
         alpha = params['_alpha']
         scale = params['_scale']
         if 'vertices' in params:
-            print("[DEBUG] Loaded vertices from pt file.")
             self.vertices = params['vertices']
         if 'triangles' in params:
-            print("[DEBUG] Loaded triangles from pt file.")
             self.triangles = params['triangles']
         if 'faces' in params:
-            print("[DEBUG] Loaded faces from pt file.")
             self.faces = params['faces']
         # point_cloud = params['point_cloud']
         self._alpha = nn.Parameter(alpha)
@@ -420,8 +412,6 @@ class LMGModel(GaussianModel):
 
     # For training
     def create_from_pcd(self, pcd: MeshPointCloud, spatial_lr_scale: float):
-        print("[DEBUG] Creating LMGModel from point cloud...")
-        
         self.point_cloud = pcd
         self.triangles = self.point_cloud.triangles
         self.spatial_lr_scale = spatial_lr_scale
@@ -615,10 +605,8 @@ class LMGModel(GaussianModel):
         scale = params['_scale']
         
         if "triangle_indices" in params:
-            print("[DEBUG] Loaded triangle_indices from ['triangle_indices'] file.")
             triangle_indices = params['triangle_indices']
         else:
-            print("[DEBUG] Loaded triangle_indices from ['point_cloud'].triangle_indices.")
             triangle_indices = params['point_cloud'].triangle_indices
         
         num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add
@@ -656,10 +644,8 @@ class LMGModel(GaussianModel):
         scale = params['_scale']
         
         if "triangle_indices" in params:
-            print("[DEBUG] Loaded triangle_indices from ['triangle_indices'] file.")
             triangle_indices = params['triangle_indices']
         else:
-            print("[DEBUG] Loaded triangle_indices from ['point_cloud'].triangle_indices.")
             triangle_indices = params['point_cloud'].triangle_indices
         
         num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add

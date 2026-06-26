@@ -187,7 +187,6 @@ class Scene:
 
         # [YC] [NOTE] Load trained GS scene (ply file) for rendering
         if self.loaded_iter:
-            print(f"[DEBUG] Scene:: loaded gs model from iteration {self.loaded_iter}")
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
@@ -203,7 +202,6 @@ class Scene:
             # [YC] note: if using "gs_mesh", the create_from_pcd() 
             # will use the one defined in mesh-splat/games/scene/gaussian_model_mesh.py
             # under class GaussianMeshModel(GaussianModel)
-            print(f"[DEBUG] Scene:: creating gs model from pcd for the first time")
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
     def save(self, iteration):
