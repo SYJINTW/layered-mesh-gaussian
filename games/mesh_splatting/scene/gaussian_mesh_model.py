@@ -577,7 +577,7 @@ class LMGModel(GaussianModel):
 
         attrs = self.__dict__
         additional_attrs = [
-            '_alpha', 
+            '_alpha',
             '_scale',
             'triangle_indices',
             'num_splats_per_triangle',
@@ -587,6 +587,10 @@ class LMGModel(GaussianModel):
         save_dict = {}
         for attr_name in additional_attrs:
             save_dict[attr_name] = attrs[attr_name]
+        if 'round_id' in attrs:
+            # Per-splat provenance (which round created it), set by the in-memory
+            # orchestrator. Not present on checkpoints from the older bash pipeline.
+            save_dict['round_id'] = attrs['round_id']
 
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         torch.save(save_dict, path_model)
