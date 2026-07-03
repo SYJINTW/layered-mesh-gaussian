@@ -25,10 +25,6 @@ from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from games import gaussianModelRender, gaussianModel
 
-from pytorch3d.io import load_objs_as_meshes
-import trimesh
-from pytorch3d.structures import Meshes
-from pytorch3d.renderer import TexturesVertex
 from train import load_textured_mesh, load_textured_mesh_for_nvdiffrast
 
 import json

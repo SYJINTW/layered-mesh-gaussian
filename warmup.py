@@ -67,38 +67,37 @@ def warmup(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, c
         
     # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
     if gs_type == "gs_mesh":
-        # [TODO] Tricky part, but it is correct
+        # Always load via pytorch3d here: this copy is consumed as p3d_mesh by
+        # DistortionMapBudgetingPolicy (scene/budgeting.py), which requires a
+        # PyTorch3D Meshes object regardless of --mesh_rasterizer_type. The copy
+        # actually used for training/rendering is (re)loaded per-rasterizer below.
         textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
-        # if mesh_rasterizer_type == "pytorch3d":
-        #     textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
-        # elif mesh_rasterizer_type == "nvdiffrast":
-        #     textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
     else:
         textured_mesh = None
     # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.
     # because, why pass the path when its already loaded right here?
     # <<<< [YC] add
-    
+
     #! [YC] note: main changing point is here
-    
+
     print("[DEBUG] going into Scene initialization...")
-    
-    # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    scene = Scene(dataset, gaussians, 
-                policy_path=policy_path, 
-                texture_obj_path=texture_obj_path, 
-                textured_mesh=textured_mesh)
+
+    scene = Scene(dataset, gaussians,
+                policy_path=policy_path,
+                texture_obj_path=texture_obj_path,
+                textured_mesh=textured_mesh,
+                mesh_rasterizer_type=mesh_rasterizer_type,
+                mesh_background_color=(1.0, 1.0, 1.0) if dataset.white_background else (0.0, 0.0, 0.0))
     gaussians.training_setup(opt)
-    
-    # [TODO] Tricky part, but it is correct
+
+    # Reload the mesh matching the actual rasterizer used for training/rendering
+    # (the load above is pytorch3d-only, for the budgeting policy's internal needs).
     if gs_type == "gs_mesh":
         if mesh_rasterizer_type == "pytorch3d":
-            scene.textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+            scene.textured_mesh = textured_mesh
         elif mesh_rasterizer_type == "nvdiffrast":
             scene.textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-    else:
-        scene.textured_mesh = None
-        
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)

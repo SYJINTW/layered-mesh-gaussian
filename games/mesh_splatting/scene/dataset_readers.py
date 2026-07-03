@@ -49,10 +49,10 @@ def get_num_splats_per_triangle(
     policy_path: str = None,
     total_splats: int = None,
     budgeting_policy_name: str = "uniform",
-    # min_splats_per_tri: int = 0, # [TODO] could be adjusted
-    # max_splats_per_tri: int = 8, # [TODO] could be adjusted
     textured_mesh = None,
-    mesh_type: str = "sugar"
+    mesh_type: str = "sugar",
+    mesh_rasterizer_type: str = "nvdiffrast",
+    mesh_background_color: tuple = (1.0, 1.0, 1.0)
 )-> np.ndarray: # [N,], number of splats on each triangle
     
     # define allocation_path only when policy_path provided
@@ -79,6 +79,8 @@ def get_num_splats_per_triangle(
             dataset_path=path,
             mesh_type=mesh_type,
             p3d_mesh=textured_mesh,
+            mesh_rasterizer_type=mesh_rasterizer_type,
+            mesh_background_color=mesh_background_color,
         )
         num_splats_per_triangle = budgeting_policy.allocate(
             total_splats=total_splats,
@@ -103,7 +105,6 @@ def get_num_splats_per_triangle(
         np.save(weights_save_path, budgeting_policy.weights)
         print(f"[INFO] Scene::Reader() Saving weights file to: {weights_save_path}")
         
-        # [DOING] [DONE] save the weights[] 
 
     # Fallback: uniform distribution using num_splats
     else:
@@ -130,7 +131,9 @@ def my_get_num_splats_per_triangle(
     pipe=None,
     gaussians=None,
     debugging=True,
-    load_iter=0
+    load_iter=0,
+    mesh_rasterizer_type: str = "nvdiffrast",
+    mesh_background_color: tuple = (1.0, 1.0, 1.0)
 )-> np.ndarray: # [N,], number of splats on each triangle
     
     # define allocation_path only when policy_path provided
@@ -160,6 +163,8 @@ def my_get_num_splats_per_triangle(
             pipe=pipe, # For GS
             gaussians=gaussians, # For GS
             debugging=debugging,
+            mesh_rasterizer_type=mesh_rasterizer_type,
+            mesh_background_color=mesh_background_color,
         )
         num_splats_per_triangle = budgeting_policy.allocate(
             total_splats=total_splats,
@@ -187,7 +192,6 @@ def my_get_num_splats_per_triangle(
         np.save(allocation_path.parent / f"weights.npy", budgeting_policy.weights)
         print(f"[INFO] Scene::Reader() Saving weights file to: {weights_save_path} and {allocation_path.parent / f'weights.npy'}")
         
-        # [DOING] [DONE] save the weights[] 
 
     # Fallback: uniform distribution using num_splats
     else:
@@ -201,11 +205,6 @@ def my_get_num_splats_per_triangle(
     
     return num_splats_per_triangle
 
-
-def get_mesh_for_policy():
-    # [TODO] load the mesh used for budgeting policy, which should be the same as the one used for training
-    pass
-
 # [YC] note: "Blender_Mesh"
 def readNerfSyntheticMeshInfo( # don't use num_splats
         path, white_background, eval, num_splats, 
@@ -215,11 +214,11 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         total_splats: int = None,  
         budget_per_tri: float = None, 
         budgeting_policy_name: str = "uniform",
-        min_splats_per_tri: int = 0,
-        max_splats_per_tri: int = 8,
         mesh_type: str = "sugar",
         textured_mesh = None,
-        preload_gs_path: str = None
+        preload_gs_path: str = None,
+        mesh_rasterizer_type: str = "nvdiffrast",
+        mesh_background_color: tuple = (1.0, 1.0, 1.0)
 ) -> SceneInfo:
     # ------------------------------- Read cameras ------------------------------- #
     print("[INFO] DatasetReader::Reading Training Transforms")
@@ -310,10 +309,10 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
             policy_path=policy_path,
             total_splats=total_splats,
             budgeting_policy_name=budgeting_policy_name,
-            # min_splats_per_tri=min_splats_per_tri,
-            # max_splats_per_tri=max_splats_per_tri,
             textured_mesh=textured_mesh,
             mesh_type=mesh_type,
+            mesh_rasterizer_type=mesh_rasterizer_type,
+            mesh_background_color=mesh_background_color,
         )
         print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
         # <<<< [SAM] Budgeting policy integration
@@ -566,95 +565,5 @@ def create_init_point_cloud(
     # ply_path = os.path.join(model_path, "points3d.ply") 
     # storePly(ply_path, pcd.points, colors)
     # print("Stored initial point cloud to", ply_path)
-    
-    return pcd
 
-def create_delta_point_cloud(
-    model_path,
-    triangles, faces, vertices,
-    existing_num_splats_per_triangle,
-    num_splats_per_triangle,
-    tri_avg_colors,
-    alpha_path
-):
-    # We create random points inside the bounds triangles
-    xyz_list = []
-    alpha_list = []
-    alpha_indices_list = [] # [YC] add
-    color_list = []
-    tri_indices_list = []
-        
-    static_alpha = torch.load(alpha_path) # [YC] add
-    torch.save(static_alpha, Path(model_path) / 'static_alpha.pt') # [YC] add
-    
-    # [TODO] Build point-to-triangle mapping & triangle-to-point mapping
-    for i in range(triangles.shape[0]):
-        existed_n = existing_num_splats_per_triangle[i]
-        n = num_splats_per_triangle[i]
-        if n == 0:
-            continue
-        
-        alpha_indices = torch.arange(existed_n, existed_n+n) # [YC] add
-        
-        # alpha = torch.rand(n, 3)
-        alpha = static_alpha[existed_n:existed_n+n]
-        alpha = alpha / alpha.sum(dim=1, keepdim=True)  # normalize to barycentric coords
-
-        pts = (alpha[:, 0:1] * triangles[i, 0] +
-            alpha[:, 1:2] * triangles[i, 1] +
-            alpha[:, 2:3] * triangles[i, 2])
-
-        color = np.repeat(tri_avg_colors[i].reshape(1, 3), n, axis=0)  # (num_pts, 3)
-        
-        xyz_list.append(pts)
-        alpha_list.append(alpha)
-        alpha_indices_list.append(alpha_indices) # [YC] add
-        color_list.append(color)
-        tri_indices_list.append(torch.full((n,), i, dtype=torch.long))
- 
-    # [DEBUG] Check if xyz_list is populated
-    print(f"[DEBUG] xyz_list length: {len(xyz_list)}")
-    if len(xyz_list) == 0:
-        print("[ERROR] xyz_list is empty! No points were generated from triangles.")
-        print(f"[DEBUG] triangles shape: {triangles.shape}")
-        print(f"[DEBUG] num_pts_each_triangle: {num_splats_per_triangle}")
-        raise RuntimeError("Failed to generate random points inside triangles")
-        
-    num_pts = num_splats_per_triangle.sum()
-    # print(f"[DEBUG] Total number of points: {num_pts}")
-    
-    xyz = torch.cat(xyz_list, dim=0)
-    xyz = xyz.reshape(num_pts, 3)
-    
-    alpha = torch.cat(alpha_list, dim=0)
-    alpha_indices = torch.cat(alpha_indices_list, dim=0) # [YC] add
-    
-    colors = np.concatenate(color_list, axis=0)
-    
-    tri_indices = torch.cat(tri_indices_list, dim=0)        
-    
-    prev_num_splats_per_triangle = existing_num_splats_per_triangle
-     
-    pcd = MeshPointCloud(
-        alpha=alpha,
-        alpha_indices=alpha_indices, # [YC] add
-        points=xyz,
-        colors=colors/255.0,
-        normals=np.zeros((num_pts, 3)),
-        vertices=vertices,
-        faces=faces,
-        transform_vertices_function=transform_vertices_function,
-        triangles=triangles.cuda(),
-        triangle_indices=tri_indices,
-        num_splats_per_triangle=num_splats_per_triangle,
-        prev_num_splats_per_triangle=prev_num_splats_per_triangle, # [YC] add
-    )
-    
-    print("Created MeshPointCloud with", pcd.points.shape[0], "points.")
-
-    # # storePly(ply_path, pcd.points, SH2RGB(shs) * 255)
-    # ply_path = os.path.join(model_path, "points3d.ply") 
-    # storePly(ply_path, pcd.points, colors)
-    # print("Stored initial point cloud to", ply_path)
-    
     return pcd

@@ -23,12 +23,7 @@ from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from games.mesh_splatting.scene.gaussian_mesh_model import GaussianMeshModel
-
-def transform_vertices_function(vertices, c=1):
-    vertices = vertices[:, [0, 2, 1]]
-    vertices[:, 1] = -vertices[:, 1]
-    vertices *= c
-    return vertices
+from games.mesh_splatting.scene.dataset_readers import transform_vertices_function
 
 
 def transform_diff(vertices, vertices_diff, t):

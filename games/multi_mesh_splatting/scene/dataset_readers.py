@@ -133,10 +133,10 @@ def readColmapSingleMeshSceneInfo(
         total_splats: int = None,  
         budget_per_tri: float = None, 
         budgeting_policy_name: str = "uniform",
-        min_splats_per_tri: int = 0,
-        max_splats_per_tri: int = 8,
         mesh_type: str = "sugar",
         textured_mesh = None,
+        mesh_rasterizer_type: str = "nvdiffrast",
+        mesh_background_color: tuple = (1.0, 1.0, 1.0),
         # <<< [YC] add
         llffhold=8):
     
@@ -238,8 +238,9 @@ def readColmapSingleMeshSceneInfo(
             total_splats=total_splats,
             budgeting_policy_name=budgeting_policy_name,
             textured_mesh=textured_mesh,
-            mesh_type=mesh_type
-            
+            mesh_type=mesh_type,
+            mesh_rasterizer_type=mesh_rasterizer_type,
+            mesh_background_color=mesh_background_color,
         )
         # <<<< [SAM] Budgeting policy integration
         

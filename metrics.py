@@ -11,6 +11,7 @@
 
 from pathlib import Path
 import os
+import re
 from PIL import Image
 import torch
 import torchvision.transforms.functional as tf
@@ -20,6 +21,26 @@ import json
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser
+
+# Matches the {policy}_{budget}_{occlusion_tag} directory convention shared by
+# exp_ablation.sh / exp_progressive_lmg.sh / _sanity_gsmesh.sh, e.g. "distortion_progressive_32000_occlusion".
+_POLICY_BUDGET_RE = re.compile(r"^(?P<policy>.+)_(?P<budget>\d+)_(?P<occ>occlusion|no_occlusion)$")
+
+
+def _parse_scene_dir_provenance(scene_dir: str) -> dict:
+    """Best-effort parse of scene/policy/budget from the output-dir naming convention.
+    Returns {} for any field that doesn't match (e.g. non-standard model_path)."""
+    parts = Path(scene_dir).parts
+    for i, part in enumerate(parts):
+        m = _POLICY_BUDGET_RE.match(part)
+        if m and i > 0:
+            return {
+                "scene": parts[i - 1],
+                "alloc_policy": m.group("policy"),
+                "budget": int(m.group("budget")),
+                "occlusion": m.group("occ") == "occlusion",
+            }
+    return {}
 
 def readImages(renders_dir, gt_dir):
     renders = []
@@ -67,14 +88,10 @@ def evaluate(gs_type, model_paths, skip_lpips=False):
                 ssims = []
                 psnrs = []
                 lpipss = []
-                # TODO: also store these
-                # - scene names
-                # - #iterations
-                # - SH degree
-                # - #GS(budget)
-                # - policy name
-                # - file size (mesh + gs)
-                # - time to train/render
+                # scene/#iterations/budget/policy/gs file size/train+render time are persisted
+                # below via _parse_scene_dir_provenance() + train_timing.json/render_timing_test.json.
+                # SH degree and mesh file size are not persisted here (would need the trained
+                # model or mesh loaded, which this script doesn't do).
                 for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
                     ssims.append(ssim(renders[idx], gts[idx]))
                     psnrs.append(psnr(renders[idx], gts[idx]))
@@ -94,6 +111,7 @@ def evaluate(gs_type, model_paths, skip_lpips=False):
 
                 # Extra provenance/cost fields (additive; existing readers key on PSNR/SSIM/LPIPS).
                 extra = {"n_views": len(renders)}
+                extra.update(_parse_scene_dir_provenance(scene_dir))
                 try:
                     extra["iteration"] = int(str(method).split("_")[-1])
                 except (ValueError, IndexError):

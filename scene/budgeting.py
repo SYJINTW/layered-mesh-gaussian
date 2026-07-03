@@ -4,7 +4,6 @@ import datetime
 from typing import Dict, Optional, Tuple 
 from types import SimpleNamespace
 from functools import partial
-from click import Path
 from tqdm import tqdm
 
 import numpy as np
@@ -64,25 +63,6 @@ class BudgetingPolicy(ABC):
         return _unbounded_proportional_allocate(self.weights, total_splats)
 
 
-    def allocate_bounded(
-        self,
-        total_splats: int,
-        min_per_tri: int,
-        max_per_tri: int
-    ) -> np.ndarray:                    # shape [N], dtype=int
-        """
-        returns a list (numpy array) of number of splats per triangle
-        """
-        return _bounded_proportional_allocate(
-            self.weights, total_splats, min_per_tri, max_per_tri
-        )
-        
-    def drop(self): # or keep(self)
-        # placeholder for future ABR algorithms
-        # could be used in render/post-processing
-        pass
-
-
 def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
     
     REGISTRY: Dict[str, type] = {
@@ -104,11 +84,11 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "texture_focus": None,
         "texture_avoid": None,
         
-        "distortion": DistortionMapBudgetingPolicy, #! [XXX]
-        "distortion_progressive": ProgressiveDistortionMapBudgetingPolicy, #! [XXX]
+        "distortion": DistortionMapBudgetingPolicy,
+        "distortion_progressive": ProgressiveDistortionMapBudgetingPolicy,
         "distortion_no_avg": partial(DistortionMapBudgetingPolicy, is_averaging_across_views=False),
-        
-        "mixed": partial(MixedBudgetingPolicy), # not yet implemented
+
+        "mixed": partial(MixedBudgetingPolicy),
         
         "mixed_v3g1": partial(MixedBudgetingPolicy, weight_visual=0.75, weight_geometry=0.25), 
         "mixed_v2g2": partial(MixedBudgetingPolicy, weight_visual=0.5, weight_geometry=0.5), 
@@ -126,113 +106,6 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         raise ValueError(f"Unknown budgeting policy: '{name}'")
 
 
-# [NOTE] we use unbounded version as default allocate() method
-# this one is currently unused
-def _bounded_proportional_allocate(
-    weights: np.ndarray,
-    total: int,
-    min_per: int,
-    max_per: int
-) -> np.ndarray:
-    """
-    input: weight/importance/priority/score per triangle
-    
-    Allocate integers that:
-    - sum exactly to 'total'
-    - each in [min_per, max_per] 
-    - proportional to 'weights' (when possible)
-    """
-    N = weights.shape[0]
-    if N == 0:
-        return np.zeros((0,), dtype=np.int32)
-    
-    max_possible = N * max_per
-    if total > max_possible:
-        print(f"[WARNING] Requested budget {total} exceeds the maximum possible #={max_possible}. "
-              f"Capping at {max_per} splats per triangle, for a new total of {max_possible}.")
-        return np.full(N, max_per, dtype=np.int32)
-
-    min_required = N * min_per
-    if total < min_required:
-        # For the lower bound, raising an error is usually better as it's an unrecoverable state.
-        raise ValueError(f"Total budget {total} is less than the minimum required {min_required}")
-
-    
-    # 1. Start with the minimum allocation for everyone
-    alloc = np.full(N, min_per, dtype=np.int32)
-    
-    # 2. Calculate remaining budget to distribute
-    remaining_budget = total - alloc.sum()
-    assert remaining_budget >= 0, "Remaining budget should be non-negative"
-    if remaining_budget == 0:
-        return alloc
-
-    ###########################################################################
-    # [NOTE] the [min,max] part could be ignored if we're just using [0, inf) # 
-    ###########################################################################
-    
-    # 3. Iteratively distribute the remaining budget
-    # Normalize weights to prevent very large numbers, ensure they are positive
-    w_sum = np.sum(weights)
-    if w_sum > 0:
-        norm_weights = weights / w_sum
-    else:
-        # If all weights are zero, fallback to uniform weights
-        norm_weights = np.ones(N, dtype=np.float32) / N
-        print("[WARNING] sum of all weights are zero; distributing uniformly.")
-
-    # Keep track of fractional parts to decide who gets the next splat
-    # "Largest Remainder Method"
-    fractional_parts = norm_weights * remaining_budget
-    
-    # Distribute the integer part of the proportional allocation
-    int_alloc = fractional_parts.astype(np.int32)
-    
-    # Check capacity constraints
-    capacity = max_per - min_per
-    int_alloc = np.minimum(int_alloc, capacity)
-    
-    alloc += int_alloc
-    
-    # 4. Distribute the final remainder one by one based on largest fractional part
-    budget_to_distribute = total - alloc.sum()
-    remainder = fractional_parts - int_alloc
-    
-    # Use sorting to give splats to those with the largest remainder
-    indices_to_add = np.argsort(-remainder, kind="stable") # Sort descending, stable
-
-    for i in range(budget_to_distribute):
-        idx = indices_to_add[i % N] # Cycle through if needed, though unlikely
-        if alloc[idx] < max_per:
-            alloc[idx] += 1
-    
-    # Final check to ensure budget is fully exhausted
-    final_sum = alloc.sum()
-    if final_sum != total:
-        # If there's still a discrepancy (due to max_per cap), adjust greedily
-        deficit = total - final_sum
-        if deficit > 0:
-            for idx in indices_to_add:
-                if deficit == 0: break
-                can_add = max_per - alloc[idx]
-                add_amount = min(deficit, can_add)
-                alloc[idx] += add_amount
-                deficit -= add_amount
-        elif deficit < 0:
-            for idx in reversed(indices_to_add):
-                if deficit == 0: break
-                can_remove = alloc[idx] - min_per
-                remove_amount = min(-deficit, can_remove)
-                alloc[idx] -= remove_amount
-                deficit += remove_amount
-
-    assert alloc.sum() == total, f"Final allocation sum {alloc.sum()} does not match total budget {total}"
-    assert np.all(alloc >= min_per) and np.all(alloc <= max_per), "Allocation violates min/max bounds"
-
-    return alloc
-
-
-#[DONE] try unbounded, namely, [0, inf)
 def _unbounded_proportional_allocate(
     weights: np.ndarray,
     total: int,
@@ -319,7 +192,6 @@ def _unbounded_proportional_allocate(
     return alloc
 
 
-# [TODO] [DOING] implement this
 # [NOTE] could change geometry weight to planarity if time permits more testing
 class MixedBudgetingPolicy(BudgetingPolicy):
     """
@@ -728,8 +600,10 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         faces_per_pixel: int = 1,
         device: str = "cuda",
         debugging: bool = True,
-        p3d_mesh: Meshes = None, 
+        p3d_mesh: Meshes = None,
         is_averaging_across_views: bool = True,
+        mesh_rasterizer_type: str = "nvdiffrast",
+        mesh_background_color: tuple = (1.0, 1.0, 1.0),
         **kwargs
     ):
         self.mesh_for_render = kwargs.get("mesh_for_render", mesh)  # textured mesh for nvdiffrast
@@ -741,6 +615,8 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         self.debugging = debugging
         self.p3d_mesh = p3d_mesh  # Store the passed-in mesh
         self.is_averaging_across_views = is_averaging_across_views
+        self.mesh_rasterizer_type = mesh_rasterizer_type
+        self.mesh_background_color = mesh_background_color
         if self.is_averaging_across_views:
             print(f"[INFO] DistortionMapBudgeter:: Averaging distortion across views")
         else: 
@@ -883,70 +759,24 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                 
                 # Get ground truth image - already [C, H, W] on GPU
                 gt_img = viewpoint_camera.original_image  # [C, H, W]
-                
-                # # Render textured mesh
-                # p3d_mesh_color_rgb, _, _ = mesh_renderer_pytorch3d(
-                #     viewpoint_camera, p3d_mesh,
-                #     image_height=cam_height,
-                #     image_width=cam_width,
-                #     faces_per_pixel=self.faces_per_pixel,
-                #     device=self.device
-                # )
-                
-                # # the rendering function doesn't support batching yet
-                # p3d_mesh_color_rgb = torch.clamp(p3d_mesh_color_rgb, 0.0, 1.0)
-                
-                # # Compute per-pixel absolute difference - [C, H, W] format
-                # dist_map = torch.mean(torch.abs(gt_img - p3d_mesh_color_rgb), dim=0)  # [H, W]
-                
-                # # Render face indices
-                # _, _, tm2p3d_fragments = mesh_renderer_pytorch3d(
-                #     viewpoint_camera, tm2p3d_mesh,
-                #     image_height=cam_height,
-                #     image_width=cam_width,
-                #     faces_per_pixel=self.faces_per_pixel,
-                #     device=self.device
-                # )
-                
-                # # Pixel-to-face mapping
-                # face_idx_map = tm2p3d_fragments.pix_to_face[0, ..., 0]  # [H, W]
-                
-                # >>>> [XXX] 
-                # Render face indices - nvdiffrast version
-                # Render RGB images
-                # mesh_color_rgb, _, _ = mesh_renderer_nvdiffrast(
-                #     viewpoint_camera, nv_mesh,
-                #     image_height=cam_height,
-                #     image_width=cam_width,
-                #     device=self.device
-                # )
-                # print("[DEBUG] Rendered RGB shape (nvdiffrast):", mesh_color_rgb.shape)
-                render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
-                                pc=None, pipe=None, 
-                                bg_color=None, bg_depth=None, 
+
+                render_pkg = mesh_splat_renderer.render(viewpoint_camera,
+                                pc=None, pipe=None,
+                                bg_color=None, bg_depth=None,
                                 textured_mesh=nv_mesh,
-                                mesh_background_color=(1.0, 1.0, 1.0),
-                                mesh_rasterizer_type="nvdiffrast"
+                                mesh_background_color=self.mesh_background_color,
+                                mesh_rasterizer_type=self.mesh_rasterizer_type
                                 )
                 mesh_color_rgb = render_pkg["render"]
                 fragments = render_pkg["fragments"]
-                # print("[DEBUG] Rendered RGB shape (rasterizer):", mesh_color_rgb.shape)
-                
+
                 mesh_color_rgb = torch.clamp(mesh_color_rgb, 0.0, 1.0)
                 # Compute per-pixel absolute difference - [C, H, W] format
                 dist_map = torch.mean(torch.abs(gt_img - mesh_color_rgb), dim=0)  # [H, W]
-                
-                # # Get pixel to face idx
-                # _, _, fragments = mesh_renderer_nvdiffrast(
-                #     viewpoint_camera, nv_mesh,
-                #     image_height=cam_height,
-                #     image_width=cam_width,
-                #     device=self.device
-                # )
+
                 # Pixel-to-face mapping
                 face_idx_map = fragments.pix_to_face[0, ..., 0]  # [H, W]
-                # <<<< [XXX]
-                
+
                 # Flatten and filter
                 face_idx_flat = face_idx_map.flatten()
                 dist_flat = dist_map.flatten()
@@ -1111,6 +941,8 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
         device: str = "cuda",
         debugging: bool = True,
         is_averaging_across_views: bool = True,
+        mesh_rasterizer_type: str = "nvdiffrast",
+        mesh_background_color: tuple = (1.0, 1.0, 1.0),
         **kwargs
     ):
         super().__init__(mesh, **kwargs)
@@ -1124,6 +956,8 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
         self.device = device
         self.debugging = debugging
         self.is_averaging_across_views = is_averaging_across_views
+        self.mesh_rasterizer_type = mesh_rasterizer_type
+        self.mesh_background_color = mesh_background_color
         
         if self.is_averaging_across_views:
             print(f"[INFO] DistortionMapBudgeter:: Averaging distortion across views")
@@ -1189,30 +1023,26 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
             # Process each camera in the batch
             for local_idx, viewpoint_camera in enumerate(batch_cameras):
                 idx = batch_start + local_idx
-                
-                # # Get camera-specific dimensions
-                # cam_height = viewpoint_camera.image_height
-                # cam_width = viewpoint_camera.image_width
-                
+
                 # Get ground truth image - already [C, H, W] on GPU
                 gt_img = viewpoint_camera.original_image  # [C, H, W]
-                
+
                 if self.gaussians is None:
-                    render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
-                                    pc=None, pipe=None, 
-                                    bg_color=None, bg_depth=None, 
+                    render_pkg = mesh_splat_renderer.render(viewpoint_camera,
+                                    pc=None, pipe=None,
+                                    bg_color=None, bg_depth=None,
                                     textured_mesh=self.mesh_for_render,
-                                    mesh_background_color=(1.0, 1.0, 1.0),
-                                    mesh_rasterizer_type="nvdiffrast"
+                                    mesh_background_color=self.mesh_background_color,
+                                    mesh_rasterizer_type=self.mesh_rasterizer_type
                                     )
                 else:
                     print("[INFO] Render both gs and mesh for distortion computation")
-                    render_pkg = mesh_splat_renderer.render(viewpoint_camera, 
-                                    pc=self.gaussians, pipe=self.pipe, 
-                                    bg_color=None, bg_depth=None, 
+                    render_pkg = mesh_splat_renderer.render(viewpoint_camera,
+                                    pc=self.gaussians, pipe=self.pipe,
+                                    bg_color=None, bg_depth=None,
                                     textured_mesh=self.mesh_for_render,
-                                    mesh_background_color=(1.0, 1.0, 1.0),
-                                    mesh_rasterizer_type="nvdiffrast"
+                                    mesh_background_color=self.mesh_background_color,
+                                    mesh_rasterizer_type=self.mesh_rasterizer_type
                                     )
                     
                 mesh_color_rgb = render_pkg["render"]

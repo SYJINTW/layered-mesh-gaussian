@@ -9,9 +9,6 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-# from pytorch3d.io import load_objs_as_meshes
-
-from itertools import count
 import json
 import os
 import time
@@ -29,10 +26,9 @@ from games import (
 )
 
 from utils.general_utils import safe_state
-import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams
 
 try:
@@ -50,7 +46,6 @@ import numpy as np
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 
 # [good to have] loss-informed stop criteria

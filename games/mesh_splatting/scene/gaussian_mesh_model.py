@@ -591,24 +591,27 @@ class LMGModel(GaussianModel):
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         torch.save(save_dict, path_model)
 
-    def load_lmg_gs(self, path, vertices, faces, alpha_path=None):
-        self._load_lmg_ply(path)
-        
+    def load_lmg_gs(self, path, vertices, faces, alpha_path=None, trainable=True):
+        if trainable:
+            self._load_lmg_ply(path)
+        else:
+            self._load_lmg_foundation_ply(path)
+
         # Load from pt file
         path_model = path.replace('point_cloud.ply', 'model_params.pt')
         params = torch.load(path_model)
-        
+
         # # Load static alpha
         # static_alpha = torch.load(alpha_path)
-        
+
         alpha = params['_alpha']
         scale = params['_scale']
-        
+
         if "triangle_indices" in params:
             triangle_indices = params['triangle_indices']
         else:
             triangle_indices = params['point_cloud'].triangle_indices
-        
+
         num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add
         alpha_indices = params['alpha_indices'] # [YC] add
 
@@ -626,46 +629,7 @@ class LMGModel(GaussianModel):
         self.triangle_indices = triangle_indices
         self.num_splats_per_triangle = num_splats_per_triangle # [YC] add
         self.alpha_indices = alpha_indices # [YC] add
-        
-        self.update_alpha()
-        self.prepare_scaling_rot()
-    
-    def load_lmg_foundation_gs(self, path, vertices, faces, alpha_path=None):
-        self._load_lmg_foundation_ply(path)
-        
-        # Load from pt file
-        path_model = path.replace('point_cloud.ply', 'model_params.pt')
-        params = torch.load(path_model)
-        
-        # # Load static alpha
-        # static_alpha = torch.load(alpha_path)
-        
-        alpha = params['_alpha']
-        scale = params['_scale']
-        
-        if "triangle_indices" in params:
-            triangle_indices = params['triangle_indices']
-        else:
-            triangle_indices = params['point_cloud'].triangle_indices
-        
-        num_splats_per_triangle = params['num_splats_per_triangle'] # [YC] add
-        alpha_indices = params['alpha_indices'] # [YC] add
 
-        # --------------------------------- VERTICES --------------------------------- #
-        self.vertices = nn.Parameter(
-            vertices.clone().detach().requires_grad_(True).cuda().float()
-        )
-        # ----------------------------------- FACES ---------------------------------- #
-        self.faces = torch.tensor(faces).cuda()
-        # --------------------------------- TRIANGLES -------------------------------- #
-        self.triangles = vertices[torch.tensor(faces).long()].float().cuda()
-
-        self._alpha = nn.Parameter(alpha)
-        self._scale = nn.Parameter(scale)
-        self.triangle_indices = triangle_indices
-        self.num_splats_per_triangle = num_splats_per_triangle # [YC] add
-        self.alpha_indices = alpha_indices # [YC] add
-        
         self.update_alpha()
         self.prepare_scaling_rot()
 

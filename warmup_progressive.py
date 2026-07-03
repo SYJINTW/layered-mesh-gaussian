@@ -21,10 +21,9 @@ from games import (
 )
 
 from utils.general_utils import safe_state
-import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams
 
 try:
@@ -44,7 +43,7 @@ import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
 import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
 
 # >>>> [YC] add
-from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud, create_delta_point_cloud
+from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud
 # <<<< [YC] add
 
 # [good to have] loss-informed stop criteria
@@ -103,7 +102,9 @@ def warmup(gs_type, dataset, opt, pipe,
                 pipe=None, # for using mesh+gs for allocation
                 gaussians=None, # for using mesh+gs for allocation
                 debugging=False,
-                load_iter=load_iter
+                load_iter=load_iter,
+                mesh_rasterizer_type=mesh_rasterizer_type,
+                mesh_background_color=(1.0, 1.0, 1.0) if dataset.white_background else (0.0, 0.0, 0.0)
             )
     else:
         num_splats_per_triangle = my_get_num_splats_per_triangle(
@@ -119,7 +120,9 @@ def warmup(gs_type, dataset, opt, pipe,
                 pipe=pipe, # for using mesh+gs for allocation
                 gaussians=scene.gaussians, # for using mesh+gs for allocation
                 debugging=False,
-                load_iter=load_iter
+                load_iter=load_iter,
+                mesh_rasterizer_type=mesh_rasterizer_type,
+                mesh_background_color=(1.0, 1.0, 1.0) if dataset.white_background else (0.0, 0.0, 0.0)
             )
     
     import matplotlib.pyplot as plt
@@ -206,70 +209,8 @@ def warmup(gs_type, dataset, opt, pipe,
             current_total_gs_idx += num_splats_total
         
         scene.gaussians = total_gaussians
-        # print(foundation_gaussians.num_splats_per_triangle.sum())
-        # print(total_gaussians.num_splats_per_triangle.sum())
-        
-        # # [TODO] This version is weird
-        # scene.save(0, warmup=False, based=True) # save the initial scene as iteration 0 based on loaded gs
-        # # new_num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
-        # pcd = create_delta_point_cloud(
-        #     model_path=dataset.model_path,
-        #     triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
-        #     existing_num_splats_per_triangle=scene.gaussians.num_splats_per_triangle,
-        #     num_splats_per_triangle=num_splats_per_triangle,
-        #     tri_avg_colors=tri_avg_colors,
-        #     alpha_path=args.alpha_path
-        # )
-        # # print(pcd.triangle_indices)
-        # delta_gaussians = gaussianModel[gs_type](dataset.sh_degree) # [YC] note: nothing changing here
-        # delta_gaussians.create_from_pcd(pcd, scene.cameras_extent)
-        # scene.gaussians = delta_gaussians
-    
+
     scene.save(load_iter, warmup=True) # save the initialized scene as iteration 0
-    
-    
-    # # [TODO] need to update the efficient of type of textured_mesh while using different rasterizers
-    # gs_path = "<OUTPUT_ROOT>/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_0/point_cloud.ply"
-    # # gs_path = "<OUTPUT_ROOT>/sample_exp_dynamic/hotdog/distortion_10000_occlusion/point_cloud/iteration_5000/point_cloud.ply"
-
-    # scene = SceneSimple(args=dataset, 
-    #                     gaussians=gaussians, 
-    #                     texture_obj_path=texture_obj_path, 
-    #                     gs_path=gs_path
-    #                     )
-    
-    # num_splats_per_triangle = my_get_num_splats_per_triangle(
-    #         dataset_path=dataset.source_path,
-    #         mesh_scene=scene.mesh_scene,
-    #         mesh_scene_for_render=scene.mesh_scene_for_render, 
-    #         triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
-    #         viewpoint_cameras=scene.train_cameras[1], # [NOTE] 1 is resolution of images
-    #         total_splats=dataset.total_splats,
-    #         budgeting_policy_name=dataset.alloc_policy,
-    #         policy_path=policy_path,
-    #         mesh_type=dataset.mesh_type,
-    #         pipe=pipe, # for using mesh+gs for allocation
-    #         gaussians=scene.gaussians, # for using mesh+gs for allocation
-    #         debugging=False
-    #     )
-    
-    # num_splats_per_triangle = num_splats_per_triangle+scene.gaussians.num_splats_per_triangle
-    
-    # tri_avg_colors = get_tri_avg_colors(scene.mesh_scene) 
-    
-    # new_pcd = create_init_point_cloud(
-    #     model_path=dataset.model_path,
-    #     triangles=scene.triangles, faces=scene.faces, vertices=scene.vertices,
-    #     num_splats_per_triangle=num_splats_per_triangle,
-    #     tri_avg_colors=tri_avg_colors,
-    # )
-    
-    # gaussians.create_from_pcd(new_pcd, scene.cameras_extent)
-    
-    # scene.save(-1) # save the initialized scene as iteration 0
-    
-    # gaussians.training_setup(opt)
-
 
     # ---------------------- Precapture mesh backgrounds ----------------------- #
     # Render textured-mesh RGB + depth per camera once, cached for train/render.

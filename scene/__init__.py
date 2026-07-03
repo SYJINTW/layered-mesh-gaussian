@@ -45,6 +45,8 @@ class Scene:
                 policy_path : str = None,
                 textured_mesh = None,
                 preload_gs_path : str = None, # path to pretrained gs model (ply file) to load at the beginning of training, for warm starting
+                mesh_rasterizer_type : str = "nvdiffrast", # used for the warmup-time distortion-policy render, must match the rasterizer used for training/rendering
+                mesh_background_color : tuple = (1.0, 1.0, 1.0),
                 # <<<< [YC] add
                 ):
         """b
@@ -83,6 +85,8 @@ class Scene:
                     budgeting_policy_name=args.alloc_policy,
                     mesh_type=args.mesh_type,
                     textured_mesh=textured_mesh,
+                    mesh_rasterizer_type=mesh_rasterizer_type,
+                    mesh_background_color=mesh_background_color,
                 )
             else:
                 raise NotImplementedError(f"Scene (colmap) loader for gs_type {args.gs_type} not implemented")
@@ -105,7 +109,9 @@ class Scene:
                     budgeting_policy_name=args.alloc_policy,
                     mesh_type=args.mesh_type,
                     textured_mesh = textured_mesh,
-                    preload_gs_path = preload_gs_path
+                    preload_gs_path = preload_gs_path,
+                    mesh_rasterizer_type=mesh_rasterizer_type,
+                    mesh_background_color=mesh_background_color,
                 )
             else:
                 raise NotImplementedError(f"Scene loader for gs_type {args.gs_type} not implemented")
@@ -170,11 +176,6 @@ class Scene:
                 json.dump(json_train_cams, file)
             with open(os.path.join(self.model_path, "test_cameras.json"), 'w') as file:
                 json.dump(json_test_cams, file)
-            
-        # if shuffle:
-        #     print("shuffle") # [YC] debug
-        #     random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
-        #     random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 

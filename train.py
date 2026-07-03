@@ -221,24 +221,26 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
     #  ------------------------Warm Up Done--------------------------- #
     
     
-    # [NOTE] the background fetched in this part is for network GUI debugger only 
+    # [NOTE] the background fetched in this part is for network GUI debugger only
     # (not used by us, and not used by training loop)
     # --------------------------- Load background image -------------------------- #
-    background_image_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_texture/r_0.png"
-    img = Image.open(background_image_path).convert("RGB")
-    # viewpoint_camera_height = 800
-    # viewpoint_camera_width = 800
-    viewpoint_camera_height = scene.getTrainCameras()[0].image_height
-    viewpoint_camera_width = scene.getTrainCameras()[0].image_width
-    img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR) # fixed issue, should be (W, H)
-    transform = T.Compose([
-        T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
-    ])
-    background = transform(img).to(torch.float32).cuda()
-    
-    # ----------------------------- Load depth image ----------------------------- #
-    background_depth_pt_path = "/mnt/data1/syjintw/NEU/dataset/hotdog/mesh_depth/r_0.pt"
-    background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
+    background = None
+    background_depth = None
+    _first_cam = scene.getTrainCameras()[0].image_name
+    background_image_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_texture" / f"{_first_cam}.png"
+    background_depth_pt_path = Path(precaptured_mesh_img_path) / mesh_rasterizer_type / "mesh_depth" / f"{_first_cam}.pt"
+    if precaptured_mesh_img_path and background_image_path.exists() and background_depth_pt_path.exists():
+        img = Image.open(background_image_path).convert("RGB")
+        viewpoint_camera_height = scene.getTrainCameras()[0].image_height
+        viewpoint_camera_width = scene.getTrainCameras()[0].image_width
+        img = img.resize((viewpoint_camera_width, viewpoint_camera_height), Image.BILINEAR) # fixed issue, should be (W, H)
+        transform = T.Compose([
+            T.ToTensor(),  # [0, 255] → [0.0, 1.0], shape (3, H, W)
+        ])
+        background = transform(img).to(torch.float32).cuda()
+
+        # ----------------------------- Load depth image ----------------------------- #
+        background_depth = torch.load(background_depth_pt_path).unsqueeze(0)
     # <<<< [YC]
 
     # ---------------------------------------------------------------------------- #
