@@ -83,7 +83,8 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
             mesh_rasterizer_type="pytorch3d",
             load_gs_path=None,
             start_iteration=0,
-            foundation_pt_path=None
+            foundation_pt_path=None,
+            unfreeze=False
             # <<<< [YC] add
             ):
     
@@ -144,7 +145,14 @@ def training(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations,
         frozen_idx_list = torch.tensor(frozen_idx_list, dtype=torch.long, device="cuda")
         # print(frozen_idx_list)
         gaussians.setup_frozen_mask(frozen_idx_list)
-    
+        if unfreeze:
+            # Local-vs-global optimum ablation: keep the same starting point (a prog
+            # checkpoint) but clear the mask so freeze_hook's zeroing is a no-op --
+            # every splat trains for the rest of this run. freeze_hook reads
+            # self.frozen_mask by closure, so this takes effect without touching hooks.
+            gaussians.frozen_mask[:] = False
+            print(f"[INFO] --unfreeze: cleared frozen mask ({len(frozen_idx_list)} previously-frozen splats now trainable)")
+
     # ---------------------------------------------------------------------------- #
     #                              Start Training Loop                             #
     # ---------------------------------------------------------------------------- #
@@ -537,7 +545,8 @@ if __name__ == "__main__":
     parser.add_argument("--load_gs_path", type=str, default=None, help="path to the pretrained GS model to load for training initialization")
     parser.add_argument("--start_iteration", type=int, default=0, help="iteration number to start training from, used together with --load_gs_path")
     parser.add_argument("--foundation_pt_path", type=str, help="path to the foundation model's .pt file, used for computing frozen mask for progressive training")
-    
+    parser.add_argument("--unfreeze", action='store_true', help="local-vs-global ablation: compute the frozen mask from --foundation_pt_path as usual, then clear it so nothing is actually frozen for this run")
+
     lp = ModelParams(parser) # LoadingParams
     args, _ = parser.parse_known_args(sys.argv[1:])
     lp.num_splats = args.num_splats
@@ -583,7 +592,8 @@ if __name__ == "__main__":
         mesh_rasterizer_type=args.mesh_rasterizer_type,
         load_gs_path=args.load_gs_path,
         start_iteration=args.start_iteration,
-        foundation_pt_path=args.foundation_pt_path
+        foundation_pt_path=args.foundation_pt_path,
+        unfreeze=args.unfreeze
         # <<<< [YC] add
     )
 
