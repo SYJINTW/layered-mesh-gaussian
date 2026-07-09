@@ -22,16 +22,23 @@
 #     --gs_type lmg --alloc_policy distortion_progressive \
 #     --precaptured_mesh_img_path <mesh_img_dir> --occlusion \
 #     --mesh_rasterizer_type nvdiffrast \
-#     --rounds 4 --splats_per_round 8000 --iters_per_round 8000 \
-#     --fixed_alpha --skip_lpips
+#     --rounds 4 --total_splats 32000 --iters_per_round 8000 \
+#     --schedule linear --fixed_alpha --skip_lpips
+#
+# --schedule controls how total_splats is split across rounds (--schedule random needs
+# --seed): linear (equal per round, default), quadratic/exponential (back-loaded, more
+# added in later rounds), logarithmic (front-loaded), random (seeded control -- see
+# Q1 in .claude/todo.md: is progressive/frozen training a fundamental floor, or an
+# artifact of the linear schedule specifically?).
 
 import json
+import math
 import os
 import sys
 import time
 from argparse import ArgumentParser
 from pathlib import Path
-from random import randint
+from random import randint, Random
 
 import numpy as np
 import torch
@@ -47,6 +54,50 @@ from renderer.mesh_splat_renderer import render
 from scene import SceneSimple
 from utils.image_utils import psnr as psnr_fn
 from utils.loss_utils import l1_loss, ssim as ssim_fn
+
+
+def compute_schedule(schedule, total_splats, rounds, seed=0):
+    """Split total_splats into `rounds` per-round increments (summing exactly to
+    total_splats) according to the requested growth-curve shape. Each shape is a
+    normalized cumulative_fraction curve over round index 1..rounds; the increment
+    for a round is the difference between consecutive cumulative fractions times
+    total_splats. The last round absorbs any rounding drift so the sum is exact."""
+    if schedule == "linear":
+        cumulative_fraction = [round_index / rounds for round_index in range(rounds + 1)]
+    elif schedule == "quadratic":
+        cumulative_fraction = [(round_index / rounds) ** 2 for round_index in range(rounds + 1)]
+    elif schedule == "exponential":
+        growth_rate = 3.0
+        cumulative_fraction = [
+            (math.exp(growth_rate * round_index / rounds) - 1) / (math.exp(growth_rate) - 1)
+            for round_index in range(rounds + 1)
+        ]
+    elif schedule == "logarithmic":
+        curve_strength = 9.0
+        cumulative_fraction = [
+            math.log(1 + curve_strength * round_index / rounds) / math.log(1 + curve_strength)
+            for round_index in range(rounds + 1)
+        ]
+    elif schedule == "random":
+        rng = Random(seed)
+        round_weights = [rng.random() for _ in range(rounds)]
+        weight_sum = sum(round_weights)
+        cumulative_fraction = [0.0]
+        running_total = 0.0
+        for weight in round_weights:
+            running_total += weight / weight_sum
+            cumulative_fraction.append(running_total)
+    else:
+        raise ValueError(f"unknown schedule: {schedule}")
+
+    per_round_splat_counts = []
+    previous_cumulative_splats = 0
+    for round_index in range(1, rounds + 1):
+        cumulative_splats = round(cumulative_fraction[round_index] * total_splats)
+        per_round_splat_counts.append(cumulative_splats - previous_cumulative_splats)
+        previous_cumulative_splats = cumulative_splats
+    per_round_splat_counts[-1] += total_splats - sum(per_round_splat_counts)
+    return per_round_splat_counts
 
 
 def get_tri_avg_colors(mesh_scene):
@@ -288,11 +339,15 @@ def save_checkpoint(gaussians, model_path, iteration):
 
 
 def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mesh_img_path,
-                 mesh_rasterizer_type, fixed_alpha, rounds, splats_per_round, iters_per_round,
-                 debugging, debug_freq):
+                 mesh_rasterizer_type, fixed_alpha, rounds, total_splats, iters_per_round,
+                 schedule, seed, debugging, debug_freq):
     model_path = dataset.model_path
     gs_type = dataset.gs_type
     gaussians = gaussianModel[gs_type](dataset.sh_degree)
+
+    per_round_splat_counts = compute_schedule(schedule, total_splats, rounds, seed)
+    print(f"[INFO] Growth schedule '{schedule}': {per_round_splat_counts} "
+          f"(total={total_splats}, rounds={rounds})")
 
     print("[INFO] Loading scene (mesh + cameras) once for the whole experiment...")
     scene = SceneSimple(args=dataset, gaussians=gaussians,
@@ -307,15 +362,17 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
 
     wall_t0 = time.time()
     current_iteration = 0
+    round_summary = []
     for round_idx in range(1, rounds + 1):
+        splats_this_round = per_round_splat_counts[round_idx - 1]
         round_dir = Path(model_path) / f"round_{round_idx}"
         round_dir.mkdir(parents=True, exist_ok=True)
-        policy_path = str(round_dir / f"distortion_progressive_{splats_per_round}.npy")
+        policy_path = str(round_dir / f"distortion_progressive_{splats_this_round}.npy")
 
-        print(f"\n[INFO] ===== Round {round_idx}/{rounds}: grow =====")
+        print(f"\n[INFO] ===== Round {round_idx}/{rounds}: grow (+{splats_this_round} splats) =====")
         gaussians, num_splats_per_triangle = grow_splats(
             gaussians, scene, dataset, opt, pipe, round_idx, policy_path,
-            mesh_rasterizer_type, fixed_alpha, splats_per_round)
+            mesh_rasterizer_type, fixed_alpha, splats_this_round)
         print(f"[INFO] Round {round_idx}: {gaussians._xyz.shape[0]} total splats")
 
         print(f"[INFO] ===== Round {round_idx}/{rounds}: train =====")
@@ -327,8 +384,18 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
         save_checkpoint(gaussians, model_path, current_iteration)
 
         print(f"[INFO] ===== Round {round_idx}/{rounds}: render + score test set =====")
-        render_and_score_test_set(gaussians, scene, pipe, gs_type, occlusion, mesh_rasterizer_type,
-                                   test_bg_cache, model_path, current_iteration)
+        results = render_and_score_test_set(gaussians, scene, pipe, gs_type, occlusion, mesh_rasterizer_type,
+                                             test_bg_cache, model_path, current_iteration)
+        round_metrics = results[f"ours_{current_iteration}"]
+        round_summary.append({
+            "round": round_idx,
+            "iteration": current_iteration,
+            "num_splats": int(gaussians._xyz.shape[0]),
+            "psnr": round_metrics["PSNR"],
+            "ssim": round_metrics["SSIM"],
+        })
+        with open(Path(model_path) / "round_summary.json", "w") as f:
+            json.dump(round_summary, f, indent=2)
 
     wall_secs = time.time() - wall_t0
     print(f"\n[INFO] Orchestrator finished all {rounds} rounds in {wall_secs:.1f}s wall-clock.")
@@ -350,9 +417,15 @@ if __name__ == "__main__":
     parser.add_argument("--mesh_rasterizer_type", type=str, default="nvdiffrast")
     parser.add_argument("--fixed_alpha", action="store_true")
     parser.add_argument("--rounds", type=int, default=4)
-    parser.add_argument("--splats_per_round", type=int, required=True,
-                         help="new splats allocated each round (total budget = splats_per_round * rounds)")
+    parser.add_argument("--total_splats", type=int, required=True,
+                         help="total splat budget across all rounds; per-round increments are "
+                              "derived from --schedule")
     parser.add_argument("--iters_per_round", type=int, required=True)
+    parser.add_argument("--schedule", type=str, default="linear",
+                         choices=["linear", "quadratic", "exponential", "logarithmic", "random"],
+                         help="how --total_splats is split across rounds")
+    parser.add_argument("--seed", type=int, default=0,
+                         help="RNG seed for --schedule random")
     parser.add_argument('--debugging', action='store_true')
     parser.add_argument('--debug_freq', type=int, default=1000)
     parser.add_argument("--warmup_only", action='store_true')
@@ -362,7 +435,7 @@ if __name__ == "__main__":
     lp.num_splats = args.num_splats
     lp.meshes = args.meshes
     lp.gs_type = args.gs_type
-    lp.total_splats = args.splats_per_round * args.rounds  # for assertions inside readers only
+    lp.total_splats = args.total_splats  # for assertions inside readers only
     lp.budget_per_tri = args.budget_per_tri
     lp.alloc_policy = args.alloc_policy
     lp.warmup_only = False
@@ -383,8 +456,10 @@ if __name__ == "__main__":
         mesh_rasterizer_type=args.mesh_rasterizer_type,
         fixed_alpha=args.fixed_alpha,
         rounds=args.rounds,
-        splats_per_round=args.splats_per_round,
+        total_splats=args.total_splats,
         iters_per_round=args.iters_per_round,
+        schedule=args.schedule,
+        seed=args.seed,
         debugging=args.debugging,
         debug_freq=args.debug_freq,
     )

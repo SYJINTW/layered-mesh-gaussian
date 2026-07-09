@@ -12,7 +12,7 @@ export CUDA_VISIBLE_DEVICES=1
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(32000)
+BUDGETS=(2000)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion_progressive")
 # Using plain "distortion" (not distortion_progressive): confirmed 2026-07-09 by reading
@@ -35,14 +35,14 @@ DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp e
 MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
 # ITERATION="15000"
-ITERATION="32000"
+ITERATION="20"
 # SAVE_ITERATIONS=("7000") 
-SAVE_ITERATIONS=("8000" "16000" "24000")
+SAVE_ITERATIONS=("10")
 
-EXP_NAME="base_gsmesh_sanity"
+EXP_NAME="smoke_sanity_gsmesh"
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
-SCENE_NAME_LIST=("hotdog" "ship" "bicycle")
+SCENE_NAME_LIST=("bicycle")
 
 MESH_TYPE="milo" # "sugar" or "colmap" or "milo"
 MESH_RASTERIZER_TYPE="nvdiffrast" # "pytorch3d" or "nvdiffrast"
