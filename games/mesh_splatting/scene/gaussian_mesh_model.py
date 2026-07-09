@@ -767,23 +767,60 @@ class LMGModel(GaussianModel):
 class LMGModelHover(LMGModel):
     """
     LMGModel variant with an additive MaGS-style hover offset:
-        xyz = surface_xyz(alpha) + sigmoid(hover) * face_normal * hover_scale
+        xyz = surface_xyz(alpha) + clamp(hover, 0, 1) * face_normal * hover_scale
     surface_xyz(alpha) is computed exactly as in LMGModel (byte-identical,
     still detached -- vertices/alpha remain non-trainable, unchanged from
     LMGModel). _hover is the only new trainable parameter and the only
     thing here NOT detached.
+
+    Near-one-sided (mostly outward) on purpose: a splat moving to the
+    -normal side sinks into the mesh's solid interior, which is at best
+    wasted capacity (occluded from every exterior view) and at worst tunnels
+    through thin geometry (plate/bun walls) and reappears on the wrong side.
+    Signed offsets (full [-1,1] tanh) were tried and reverted for exactly
+    this reason. A small negative allowance IS kept -- asymptotic range
+    (-hover_eps, 1), not (0, 1) -- for two reasons: (a) the occlusion-aware
+    rasterizer (cuda_rasterizer/forward.cu:362) already tolerates a splat up
+    to 0.1 world-units behind the mesh depth before culling it outright
+    (`depths[j] <= depth_bg[pix]+0.1`), so a shallow inward offset isn't
+    visually or gradient-wise catastrophic; (b) a hard clamp to exactly
+    [0,1] puts 0 on a dead boundary (gradient exactly 0 below it) -- any
+    splat pushed slightly negative gets permanently stuck there, the same
+    class of failure as the vanishing-gradient bug this replaced, just
+    relocated. hover_eps is small relative to the outward range so the
+    offset stays overwhelmingly outward-biased; it has NOT been checked
+    against hover_scale (which varies per triangle) to guarantee the true
+    world-unit inward excursion stays under the renderer's 0.1 margin for
+    every triangle -- flagged as an open follow-up, not solved here.
+
+    Activation: tanh(x) on the outward (x>=0) side, hover_eps*tanh(x) on the
+    inward (x<0) side -- asymmetric scaled tanh, not a hard clamp and not
+    the original one-sided sigmoid. Smooth and monotonic on each side
+    (continuous at x=0, both pieces agree there since tanh(0)=0; slope has a
+    kink at exactly x=0, a single measure-zero point, same caliber as
+    ReLU's kink at 0 -- not a practical concern). Critically, gradient only
+    decays *asymptotically* toward 0 as |x| grows, it is never exactly 0 for
+    finite x, so -- unlike hard clamp -- there is no dead zone a splat can
+    get permanently stuck in. Raw hover is initialized near 0 (uniform in
+    (0, hover_init_scale)), exactly where tanh's gradient is steepest
+    (tanh'(0)=1), avoiding the original bug (sigmoid initialized deep in its
+    saturating tail: measured sigmoid(hover) stayed within [0, 0.09] of its
+    near-zero init after 32k iters, i.e. never moved -- see worklog
+    2026-07-10).
     """
 
     def __init__(self, sh_degree: int):
         super().__init__(sh_degree)
         self._hover = None
-        self.hover_activation = torch.sigmoid
+        self.hover_eps = 0.05
         self.hover_init_scale = 1e-2
 
+    def hover_activation(self, x):
+        t = torch.tanh(x)
+        return torch.where(x >= 0, t, self.hover_eps * t)
+
     def _init_hover(self, num_pts):
-        raw = inverse_sigmoid(
-            torch.rand(num_pts, 1, device="cuda") * self.hover_init_scale + self.eps_s0
-        )
+        raw = torch.rand(num_pts, 1, device="cuda") * self.hover_init_scale
         self._hover = nn.Parameter(raw.requires_grad_(True))
 
     def _face_normals_and_hover_scales(self, triangles):
