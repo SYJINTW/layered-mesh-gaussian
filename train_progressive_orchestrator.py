@@ -33,7 +33,6 @@
 
 import json
 import math
-import os
 import sys
 import time
 from argparse import ArgumentParser
@@ -44,10 +43,12 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
+from loguru import logger
 from PIL import Image
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams
+import renderer.mesh_loader.mesh_loader as mesh_loader
 from games import gaussianModel, optimizationParamTypeCallbacks
 from games.mesh_splatting.scene.dataset_readers import create_init_point_cloud, my_get_num_splats_per_triangle
 from renderer.mesh_splat_renderer import render
@@ -275,7 +276,7 @@ def train_round(gaussians, scene, opt, pipe, gs_type, iterations, start_iteratio
         json.dump({"train_secs": train_secs, "peak_vram_mb": peak_vram_mb, "iterations": iterations}, f)
     with open(Path(model_path) / f"training_metrics_round{round_idx}.json", "w") as f:
         json.dump(history, f)
-    print(f"[INFO] Round {round_idx} train_secs={train_secs:.1f} peak_vram_mb={peak_vram_mb:.0f} "
+    logger.info(f"Round {round_idx} train_secs={train_secs:.1f} peak_vram_mb={peak_vram_mb:.0f} "
           f"frozen={len(frozen_idx)}/{gaussians._xyz.shape[0]}")
 
 
@@ -313,7 +314,7 @@ def render_and_score_test_set(gaussians, scene, pipe, gs_type, occlusion, mesh_r
 
             ssims.append(ssim_fn(image.unsqueeze(0), gt_image.unsqueeze(0)).item())
             psnrs.append(psnr_fn(image.unsqueeze(0), gt_image.unsqueeze(0)).item())
-
+            # [TODO] add LPIPS back
             TF.to_pil_image(image.detach().clamp(0, 1).cpu()).save(render_dir / f"{idx:05d}.png")
             TF.to_pil_image(gt_image.detach().clamp(0, 1).cpu()).save(gt_dir / f"{idx:05d}.png")
 
@@ -328,8 +329,34 @@ def render_and_score_test_set(gaussians, scene, pipe, gs_type, occlusion, mesh_r
     }
     with open(Path(model_path) / "results_lmg.json", "w") as f:
         json.dump(results, f, indent=True)
-    print(f"[INFO] Round @ iter {iteration}: PSNR={np.mean(psnrs):.3f} SSIM={np.mean(ssims):.4f}")
+    logger.info(f"Round @ iter {iteration}: PSNR={np.mean(psnrs):.3f} SSIM={np.mean(ssims):.4f}")
     return results
+
+
+def score_mesh_baseline(scene, pipe, occlusion, mesh_rasterizer_type, test_bg_cache):
+    """PSNR/SSIM of the mesh background alone (0 GS splats, pc=None short-circuits render()
+    to the cached mesh texture) -- the deltaQ baseline each round's GS improvement is
+    measured against."""
+    cams = scene.getTestCameras()
+    ssims, psnrs = [], []
+    with torch.no_grad():
+        for cam in cams:
+            bg, bg_depth = None, None
+            if cam.image_name in test_bg_cache:
+                cbg, cbg_depth = test_bg_cache[cam.image_name]
+                bg = cbg.to("cuda", non_blocking=True)
+                bg_depth = cbg_depth.to("cuda", non_blocking=True)
+            pure_bg_depth = torch.zeros((1, cam.image_height, cam.image_width),
+                                         dtype=torch.float32, device="cuda")
+            render_pkg = render(cam, None, pipe, bg_color=bg,
+                                 bg_depth=bg_depth if occlusion else pure_bg_depth,
+                                 textured_mesh=scene.textured_mesh,
+                                 mesh_rasterizer_type=mesh_rasterizer_type)
+            image = render_pkg["render"]
+            gt_image = cam.original_image[0:3].cuda()
+            ssims.append(ssim_fn(image.unsqueeze(0), gt_image.unsqueeze(0)).item())
+            psnrs.append(psnr_fn(image.unsqueeze(0), gt_image.unsqueeze(0)).item())
+    return {"PSNR": float(np.mean(psnrs)), "SSIM": float(np.mean(ssims))}
 
 
 def save_checkpoint(gaussians, model_path, iteration):
@@ -346,19 +373,32 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
     gaussians = gaussianModel[gs_type](dataset.sh_degree)
 
     per_round_splat_counts = compute_schedule(schedule, total_splats, rounds, seed)
-    print(f"[INFO] Growth schedule '{schedule}': {per_round_splat_counts} "
+    logger.info(f"Growth schedule '{schedule}': {per_round_splat_counts} "
           f"(total={total_splats}, rounds={rounds})")
 
-    print("[INFO] Loading scene (mesh + cameras) once for the whole experiment...")
+    logger.info("Loading scene (mesh + cameras) once for the whole experiment...")
     scene = SceneSimple(args=dataset, gaussians=gaussians,
                          texture_obj_path=texture_obj_path, gs_path=None)
+    # SceneSimple never sets .textured_mesh itself (only .mesh_scene) -- caller derives the
+    # rasterizer-appropriate form, same pattern as warmup_progressive.py. Needed whenever a
+    # test cam misses the precaptured cache (e.g. score_mesh_baseline, or a partial cache).
+    if mesh_rasterizer_type == "pytorch3d":
+        scene.textured_mesh = mesh_loader.to_pytorch3d_meshes(scene.mesh_scene)
+    else:
+        scene.textured_mesh = scene.mesh_scene
 
-    print("[INFO] Prefetching precaptured mesh backgrounds once for the whole experiment "
+    logger.info("Prefetching precaptured mesh backgrounds once for the whole experiment "
           "(bash pipeline reloads these from disk every round's train.py invocation)...")
     train_bg_cache = build_bg_cache(scene.getTrainCameras(), precaptured_mesh_img_path,
                                      "mesh_texture", "mesh_depth")
     test_bg_cache = build_bg_cache(scene.getTestCameras(), precaptured_mesh_img_path,
                                     "test_mesh_texture", "test_mesh_depth")
+
+    logger.info("Scoring mesh-only baseline (0 GS splats) for deltaQ...")
+    mesh_baseline = score_mesh_baseline(scene, pipe, occlusion, mesh_rasterizer_type, test_bg_cache)
+    logger.info(f"Mesh-only baseline: PSNR={mesh_baseline['PSNR']:.3f} SSIM={mesh_baseline['SSIM']:.4f}")
+    with open(Path(model_path) / "mesh_baseline.json", "w") as f:
+        json.dump(mesh_baseline, f, indent=2)
 
     wall_t0 = time.time()
     current_iteration = 0
@@ -369,21 +409,21 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
         round_dir.mkdir(parents=True, exist_ok=True)
         policy_path = str(round_dir / f"distortion_progressive_{splats_this_round}.npy")
 
-        print(f"\n[INFO] ===== Round {round_idx}/{rounds}: grow (+{splats_this_round} splats) =====")
+        logger.info(f"\n===== Round {round_idx}/{rounds}: grow (+{splats_this_round} splats) =====")
         gaussians, num_splats_per_triangle = grow_splats(
             gaussians, scene, dataset, opt, pipe, round_idx, policy_path,
             mesh_rasterizer_type, fixed_alpha, splats_this_round)
-        print(f"[INFO] Round {round_idx}: {gaussians._xyz.shape[0]} total splats")
+        logger.info(f"Round {round_idx}: {gaussians._xyz.shape[0]} total splats")
 
-        print(f"[INFO] ===== Round {round_idx}/{rounds}: train =====")
+        logger.info(f"===== Round {round_idx}/{rounds}: train =====")
         train_round(gaussians, scene, opt, pipe, gs_type, iters_per_round, current_iteration,
                     occlusion, train_bg_cache, round_idx, debugging, debug_freq, model_path)
         current_iteration += iters_per_round
 
-        print(f"[INFO] ===== Round {round_idx}/{rounds}: checkpoint =====")
+        logger.info(f"===== Round {round_idx}/{rounds}: checkpoint =====")
         save_checkpoint(gaussians, model_path, current_iteration)
 
-        print(f"[INFO] ===== Round {round_idx}/{rounds}: render + score test set =====")
+        logger.info(f"===== Round {round_idx}/{rounds}: render + score test set =====")
         results = render_and_score_test_set(gaussians, scene, pipe, gs_type, occlusion, mesh_rasterizer_type,
                                              test_bg_cache, model_path, current_iteration)
         round_metrics = results[f"ours_{current_iteration}"]
@@ -393,12 +433,14 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
             "num_splats": int(gaussians._xyz.shape[0]),
             "psnr": round_metrics["PSNR"],
             "ssim": round_metrics["SSIM"],
+            "delta_psnr_vs_mesh": round_metrics["PSNR"] - mesh_baseline["PSNR"],
+            "delta_ssim_vs_mesh": round_metrics["SSIM"] - mesh_baseline["SSIM"],
         })
         with open(Path(model_path) / "round_summary.json", "w") as f:
             json.dump(round_summary, f, indent=2)
 
     wall_secs = time.time() - wall_t0
-    print(f"\n[INFO] Orchestrator finished all {rounds} rounds in {wall_secs:.1f}s wall-clock.")
+    logger.info(f"\nOrchestrator finished all {rounds} rounds in {wall_secs:.1f}s wall-clock.")
     with open(Path(model_path) / "orchestrator_timing.json", "w") as f:
         json.dump({"wall_secs": wall_secs, "rounds": rounds}, f)
 
@@ -445,8 +487,8 @@ if __name__ == "__main__":
     pp = PipelineParams(parser)
     args = parser.parse_args(sys.argv[1:])
 
-    print("torch cuda: ", torch.cuda.is_available())
-    print("Optimizing " + args.model_path)
+    logger.info(f"torch cuda: {torch.cuda.is_available()}")
+    logger.info(f"Optimizing {args.model_path}")
 
     orchestrate(
         lp.extract(args), op.extract(args), pp.extract(args),
@@ -463,4 +505,4 @@ if __name__ == "__main__":
         debugging=args.debugging,
         debug_freq=args.debug_freq,
     )
-    print("\n[INFO] Orchestrator complete.")
+    logger.info("\nOrchestrator complete.")

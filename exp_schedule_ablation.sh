@@ -10,9 +10,10 @@
 #   bash exp_schedule_ablation.sh <group> <gpu>
 #
 # Groups (2 GPUs):
-#   bicycle     : bicycle linear + bicycle random seed=42                    (2 configs, gpu0)
-#   hotdog_ship : hotdog random seed 1-5 (run FIRST) + hotdog linear +
-#                 ship linear + ship random seed=42                          (8 configs, gpu1)
+#   bicycle     : bicycle linear + bicycle quadratic + bicycle random seed=42       (3 configs)
+#   hotdog_ship : hotdog random seed 1-5 (run FIRST) + hotdog linear + hotdog quadratic +
+#                 ship linear + ship quadratic + ship random seed=42               (10 configs)
+# All configs use --fixed_alpha (canonical, non-random barycentric init) as a control.
 # hotdog gets 5 random seeds (not just 1) because a single random draw doesn't prove
 # schedule-shape doesn't matter; ship/bicycle get 1 random seed each. The hotdog random
 # seeds run first within hotdog_ship since they're the actual point of Q1 -- everything
@@ -69,7 +70,7 @@ run_config() {
     PY train_progressive_orchestrator.py --eval -s "$DATASET_DIR" -m "$OUT" $IMAGES \
         --texture_obj_path "$MESH_FILE" --mesh_type milo --gs_type lmg \
         --alloc_policy distortion_progressive --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-        --occlusion --mesh_rasterizer_type nvdiffrast \
+        --occlusion --mesh_rasterizer_type nvdiffrast --fixed_alpha \
         --rounds "$ROUNDS" --total_splats "$TOTAL_SPLATS" --iters_per_round "$ITER_PER" \
         --schedule "$schedule" --seed "$seed" > "$LOG" 2>&1 \
         || { echo "[FAIL] $tag (see $LOG)"; return; }
@@ -80,10 +81,11 @@ run_config() {
 
 case "$GROUP" in
     bicycle)
-        CONFIGS=("bicycle:linear:0" "bicycle:random:42") ;;
+        CONFIGS=("bicycle:linear:0" "bicycle:quadratic:0" "bicycle:random:42") ;;
     hotdog_ship)
         CONFIGS=("hotdog:random:1" "hotdog:random:2" "hotdog:random:3" "hotdog:random:4" "hotdog:random:5" \
-                 "hotdog:linear:0" "ship:linear:0" "ship:random:42") ;;
+                 "hotdog:linear:0" "hotdog:quadratic:0" \
+                 "ship:linear:0" "ship:quadratic:0" "ship:random:42") ;;
     *) echo "unknown group: $GROUP (expected bicycle|hotdog_ship)"; exit 1 ;;
 esac
 

@@ -869,6 +869,8 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
             mesh_bg_dir.mkdir(parents=True, exist_ok=True)
             gt_dir = base_dir / "gt"
             gt_dir.mkdir(parents=True, exist_ok=True)
+            compare_dir = base_dir / "compare"
+            compare_dir.mkdir(parents=True, exist_ok=True)
 
             # 1) Per-view artifacts
             if per_view_debug is not None:
@@ -903,6 +905,22 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                         plt.close()
                     except Exception as e:
                         print(f"[WARNING] Could not save heatmap for {name}: {e}")
+
+                    # Save side-by-side gt/bg/heatmap comparison
+                    try:
+                        gt_p, bg_p, heat_p = gt_dir / f"{name}.png", mesh_bg_dir / f"{name}.png", heatmap_dir / f"{name}.png"
+                        if gt_p.exists() and bg_p.exists() and heat_p.exists():
+                            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                            for axis, path, title in zip(axes, (gt_p, bg_p, heat_p), ("gt", "mesh bg render", "|gt - render| heatmap")):
+                                axis.imshow(plt.imread(str(path)))
+                                axis.set_title(title)
+                                axis.axis('off')
+                            fig.suptitle(name)
+                            fig.tight_layout()
+                            fig.savefig(str(compare_dir / f"{name}.png"), dpi=120)
+                            plt.close(fig)
+                    except Exception as e:
+                        print(f"[WARNING] Could not save compare for {name}: {e}")
 
             # 2) Global PLY with per-vertex colors aggregated from per-face distortion
             dist_norm = (dist_map_all - dist_map_all.min()) / (dist_map_all.ptp() + EPS)
@@ -1140,6 +1158,8 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
             mesh_bg_dir.mkdir(parents=True, exist_ok=True)
             gt_dir = base_dir / "gt"
             gt_dir.mkdir(parents=True, exist_ok=True)
+            compare_dir = base_dir / "compare"
+            compare_dir.mkdir(parents=True, exist_ok=True)
 
             # 1) Per-view artifacts
             if per_view_debug is not None:
@@ -1174,6 +1194,22 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
                         plt.close()
                     except Exception as e:
                         print(f"[WARNING] Could not save heatmap for {name}: {e}")
+
+                    # Save side-by-side gt/bg/heatmap comparison
+                    try:
+                        gt_p, bg_p, heat_p = gt_dir / f"{name}.png", mesh_bg_dir / f"{name}.png", heatmap_dir / f"{name}.png"
+                        if gt_p.exists() and bg_p.exists() and heat_p.exists():
+                            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                            for axis, path, title in zip(axes, (gt_p, bg_p, heat_p), ("gt", "mesh bg render", "|gt - render| heatmap")):
+                                axis.imshow(plt.imread(str(path)))
+                                axis.set_title(title)
+                                axis.axis('off')
+                            fig.suptitle(name)
+                            fig.tight_layout()
+                            fig.savefig(str(compare_dir / f"{name}.png"), dpi=120)
+                            plt.close(fig)
+                    except Exception as e:
+                        print(f"[WARNING] Could not save compare for {name}: {e}")
 
             # 2) Global PLY with per-vertex colors aggregated from per-face distortion
             dist_norm = (dist_map_all - dist_map_all.min()) / (dist_map_all.ptp() + EPS)
