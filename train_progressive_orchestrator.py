@@ -211,7 +211,8 @@ def grow_splats(gaussians, scene, dataset, opt, pipe, round_idx, policy_path,
 
 
 def train_round(gaussians, scene, opt, pipe, gs_type, iterations, start_iteration,
-                 occlusion, bg_cache, round_idx, debugging, debug_freq, model_path):
+                 occlusion, bg_cache, round_idx, debugging, debug_freq, model_path,
+                 white_background=False):
     """In-memory equivalent of train_progressive.py's training loop for one round.
     Frozen mask comes from round_id (no foundation_pt_path file needed): everything
     created in a strictly earlier round is frozen for this round."""
@@ -255,10 +256,28 @@ def train_round(gaussians, scene, opt, pipe, gs_type, iterations, start_iteratio
         gt_image = cam.original_image.cuda()
 
         if debugging and iteration % debug_freq == 0:
-            TF.to_pil_image(gt_image.detach().clamp(0, 1).cpu()).save(
-                check_path / f"{iteration + start_iteration}_gt.png")
-            TF.to_pil_image(image.detach().clamp(0, 1).cpu()).save(
-                check_path / f"{iteration + start_iteration}_training.png")
+            tag = iteration + start_iteration
+
+            # gs-only: flat bg_color + zero bg_depth + no textured_mesh -- nothing occludes,
+            # no mesh shown, pure GS render.
+            pure_bg_template = [1, 1, 1] if white_background else [0, 0, 0]
+            pure_bg = torch.tensor(pure_bg_template, dtype=torch.float32, device="cuda").view(3, 1, 1)
+            pure_bg = pure_bg.expand(3, cam.image_height, cam.image_width)
+            gs_only = render(cam, gaussians, pipe, bg_color=pure_bg, bg_depth=pure_bg_depth,
+                              textured_mesh=None)["render"]
+
+            panes = {
+                "gt": gt_image,
+                "mesh-only": render_pkg["bg_color"],
+                "gs-only": gs_only,
+                "mesh+gs": image,
+            }
+            pil_panes = [TF.to_pil_image(t.detach().clamp(0, 1).cpu()) for t in panes.values()]
+            w, h = pil_panes[0].size
+            grid = Image.new("RGB", (2 * w, 2 * h))
+            for idx, pane in enumerate(pil_panes):
+                grid.paste(pane, ((idx % 2) * w, (idx // 2) * h))
+            grid.save(check_path / f"{tag}_compare.png")
 
         Ll1 = l1_loss(image, gt_image)
         cur_ssim = ssim_fn(image, gt_image)
@@ -425,7 +444,8 @@ def orchestrate(dataset, opt, pipe, texture_obj_path, occlusion, precaptured_mes
 
         logger.info(f"===== Round {round_idx}/{rounds}: train =====")
         train_round(gaussians, scene, opt, pipe, gs_type, iters_per_round, current_iteration,
-                    occlusion, train_bg_cache, round_idx, debugging, debug_freq, model_path)
+                    occlusion, train_bg_cache, round_idx, debugging, debug_freq, model_path,
+                    white_background=dataset.white_background)
         current_iteration += iters_per_round
 
         logger.info(f"===== Round {round_idx}/{rounds}: checkpoint =====")
