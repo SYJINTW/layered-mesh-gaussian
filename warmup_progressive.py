@@ -39,8 +39,7 @@ import numpy as np
 from pathlib import Path
 
 
-import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
-import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 # >>>> [YC] add
 from games.mesh_splatting.scene.dataset_readers import my_get_num_splats_per_triangle, create_init_point_cloud
@@ -220,10 +219,16 @@ def warmup(gs_type, dataset, opt, pipe,
         if not precaptured_mesh_img_path:
             raise ValueError("precaptured_mesh_img_path must be provided for warmup_only mode")
 
-        if mesh_rasterizer_type == "pytorch3d":
-            scene.textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+        # scene.mesh_scene is already loaded + transformed (SceneSimple.__init__) —
+        # reuse it directly instead of re-reading the file from disk (colmap/milo only;
+        # sugar needs pytorch3d's own UV-aware loader, no in-memory trimesh to reuse).
+        if dataset.mesh_type in ("colmap", "milo"):
+            if mesh_rasterizer_type == "pytorch3d":
+                scene.textured_mesh = mesh_loader.to_pytorch3d_meshes(scene.mesh_scene)
+            else:
+                scene.textured_mesh = scene.mesh_scene
         else:
-            scene.textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
+            scene.textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, mesh_rasterizer_type)
 
         mesh_bg_color = (1, 1, 1) if dataset.white_background else (0, 0, 0)
 

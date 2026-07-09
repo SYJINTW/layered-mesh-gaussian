@@ -24,10 +24,8 @@ from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from pytorch3d.structures import Meshes
 
 # >>>> [YC] add
-import trimesh
-import numpy as np
 import torch
-from games.mesh_splatting.scene.dataset_readers import transform_vertices_function
+import renderer.mesh_loader.mesh_loader as mesh_loader
 # <<<< [YC] add
 
 class Scene:
@@ -87,6 +85,7 @@ class Scene:
                     textured_mesh=textured_mesh,
                     mesh_rasterizer_type=mesh_rasterizer_type,
                     mesh_background_color=mesh_background_color,
+                    resolution=args.resolution,
                 )
             else:
                 raise NotImplementedError(f"Scene (colmap) loader for gs_type {args.gs_type} not implemented")
@@ -98,7 +97,7 @@ class Scene:
                 # Synthetic scene uses this loader
                 # [NOTE] This step load the texture mesh and compute the budgeting policy
                 scene_info = sceneLoadTypeCallbacks["Blender_Mesh"](
-                    path=args.source_path, 
+                    path=args.source_path,
                     white_background=args.white_background,
                     eval=args.eval,
                     num_splats=args.num_splats[0],
@@ -112,6 +111,7 @@ class Scene:
                     preload_gs_path = preload_gs_path,
                     mesh_rasterizer_type=mesh_rasterizer_type,
                     mesh_background_color=mesh_background_color,
+                    resolution=args.resolution,
                 )
             else:
                 raise NotImplementedError(f"Scene loader for gs_type {args.gs_type} not implemented")
@@ -318,19 +318,12 @@ class SceneSimple(Scene):
         # else skip it
         if texture_obj_path is not None and os.path.exists(texture_obj_path):
             print(f"[INFO] Found textured mesh at {texture_obj_path}, loading textured mesh for rendering.")
-            mesh_scene_for_render = trimesh.load(texture_obj_path, force='mesh') # for rendering only, keep it as a scene to preserve texture information
-            # [BUG] Don't know why don't need to transform
-            mesh_scene = trimesh.load(texture_obj_path, force='mesh') # same as load_textured_mesh_for_nvdiffrast() in mesh_loader_nvdiffrast.py, but with additional transform for axis alignment and scale normalization
-            mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-                angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-            ))
-            vertices = transform_vertices_function(
-                torch.tensor(mesh_scene.vertices),
-            )
+            mesh_scene = mesh_loader.load_transformed_mesh(texture_obj_path)
+            vertices = torch.tensor(mesh_scene.vertices)
             faces = mesh_scene.faces
             triangles = vertices[torch.tensor(mesh_scene.faces).long()].float()
 
-            self.mesh_scene_for_render = mesh_scene_for_render
+            self.mesh_scene_for_render = mesh_scene
             self.mesh_scene = mesh_scene
             self.vertices = vertices
             self.faces = faces

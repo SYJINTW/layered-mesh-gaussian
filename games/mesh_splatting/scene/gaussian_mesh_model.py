@@ -21,6 +21,7 @@ from scene.gaussian_model import GaussianModel
 from utils.general_utils import inverse_sigmoid, rot_to_quat_batch
 from utils.sh_utils import RGB2SH
 from games.mesh_splatting.utils.graphics_utils import MeshPointCloud
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 
 class GaussianMeshModel(GaussianModel):
@@ -261,18 +262,10 @@ class GaussianMeshModel(GaussianModel):
         # ---------------------------------------------------------------------------- #
         if texture_obj_path is None:
             raise ValueError("GaussianMeshModel.load_ply requires texture_obj_path to load the mesh")
-        import trimesh
-        mesh_scene = trimesh.load(texture_obj_path, force='mesh')
-        mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-            angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-        ))
+        mesh_scene = mesh_loader.load_transformed_mesh(texture_obj_path)
         # --------------------------------- VERTICES --------------------------------- #
         # print("[DEBUG] Loaded vertices from mesh")
-        vertices = mesh_scene.vertices
-        # transform_vertices_function()
-        vertices = torch.tensor(vertices[:, [0, 2, 1]])
-        vertices[:, 1] = -vertices[:, 1]
-        vertices *= 1
+        vertices = torch.tensor(mesh_scene.vertices)
         vertices = nn.Parameter(
             vertices.clone().detach().requires_grad_(True).cuda().float()
         )

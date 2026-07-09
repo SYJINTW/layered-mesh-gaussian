@@ -604,6 +604,7 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         is_averaging_across_views: bool = True,
         mesh_rasterizer_type: str = "nvdiffrast",
         mesh_background_color: tuple = (1.0, 1.0, 1.0),
+        resolution: int = -1,
         **kwargs
     ):
         self.mesh_for_render = kwargs.get("mesh_for_render", mesh)  # textured mesh for nvdiffrast
@@ -619,13 +620,13 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
         self.mesh_background_color = mesh_background_color
         if self.is_averaging_across_views:
             print(f"[INFO] DistortionMapBudgeter:: Averaging distortion across views")
-        else: 
+        else:
             print(f"[INFO] DistortionMapBudgeter:: Not averaging distortion across views")
-        
+
         assert self.viewpoint_camera_infos is not None and len(self.viewpoint_camera_infos) != 0, "DistorsionMapPolicy::Missing CamInfos"
 
-        # Build Camera objects
-        args = SimpleNamespace(resolution= -1, data_device=device) # dummy args
+        # Build Camera objects, matching the real training resolution
+        args = SimpleNamespace(resolution=resolution, data_device=device)
         
         # this camera should be freed after use?
         self.viewpoint_cameras = cameraList_from_camInfos(
@@ -859,14 +860,16 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
             from pathlib import Path
             from datetime import datetime
 
-            # 產生格式化時間，例如：20260515_162012
-            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            scene_name = Path(self.dataset_path).name if self.dataset_path else "unknown_scene"
+            run_id = f"{datetime.now().strftime('%Y%m%d_%H%M')}_{scene_name}"
             base_dir = Path(".")/ "distortion_debug_visualization" / f"{run_id}"
             heatmap_dir = base_dir / "heatmap"
             heatmap_dir.mkdir(parents=True, exist_ok=True)
             mesh_bg_dir = base_dir / "bg"
             mesh_bg_dir.mkdir(parents=True, exist_ok=True)
-            
+            gt_dir = base_dir / "gt"
+            gt_dir.mkdir(parents=True, exist_ok=True)
+
             # 1) Per-view artifacts
             if per_view_debug is not None:
                 for item in per_view_debug:
@@ -880,6 +883,13 @@ class DistortionMapBudgetingPolicy(BudgetingPolicy):
                     except Exception as e:
                         print(f"[WARNING] Could not save render for {name}: {e} (got {getattr(item['render'], 'shape', None)})")
                         pass
+
+                    # Save ground truth (for bg/heatmap/gt side-by-side comparison)
+                    try:
+                        gt_pil = TF.to_pil_image(item["gt"].cpu().clamp(0, 1))
+                        gt_pil.save(str(gt_dir / f"{name}.png"))
+                    except Exception as e:
+                        print(f"[WARNING] Could not save gt for {name}: {e}")
 
                     # Save heatmap (normalized)
                     try:
@@ -1121,14 +1131,16 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
             from pathlib import Path
             from datetime import datetime
 
-            # 產生格式化時間，例如：20260515_162012
-            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            scene_name = Path(self.dataset_path).name if self.dataset_path else "unknown_scene"
+            run_id = f"{datetime.now().strftime('%Y%m%d_%H%M')}_{scene_name}"
             base_dir = Path(".")/ "distortion_debug_visualization" / f"{run_id}"
             heatmap_dir = base_dir / "heatmap"
             heatmap_dir.mkdir(parents=True, exist_ok=True)
             mesh_bg_dir = base_dir / "bg"
             mesh_bg_dir.mkdir(parents=True, exist_ok=True)
-            
+            gt_dir = base_dir / "gt"
+            gt_dir.mkdir(parents=True, exist_ok=True)
+
             # 1) Per-view artifacts
             if per_view_debug is not None:
                 for item in per_view_debug:
@@ -1142,6 +1154,13 @@ class ProgressiveDistortionMapBudgetingPolicy(BudgetingPolicy):
                     except Exception as e:
                         print(f"[WARNING] Could not save render for {name}: {e} (got {getattr(item['render'], 'shape', None)})")
                         pass
+
+                    # Save ground truth (for bg/heatmap/gt side-by-side comparison)
+                    try:
+                        gt_pil = TF.to_pil_image(item["gt"].cpu().clamp(0, 1))
+                        gt_pil.save(str(gt_dir / f"{name}.png"))
+                    except Exception as e:
+                        print(f"[WARNING] Could not save gt for {name}: {e}")
 
                     # Save heatmap (normalized)
                     try:

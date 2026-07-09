@@ -30,13 +30,7 @@ from PIL import Image
 
 from mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
 
-def transform_vertices_function(vertices, c=1):
-    vertices = vertices[:, [0, 2, 1]]
-    vertices[:, 1] = -vertices[:, 1]
-    vertices *= c
-    return vertices
-
-def render(viewpoint_camera, pc : GaussianModel, pipe, 
+def render(viewpoint_camera, pc : GaussianModel, pipe,
            bg_color : torch.Tensor, bg_depth : torch.Tensor,
            scaling_modifier = 1.0, override_color = None,
            textured_mesh=None):

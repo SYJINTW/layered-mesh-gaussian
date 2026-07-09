@@ -39,8 +39,7 @@ import numpy as np
 from pathlib import Path
 
 
-import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
-import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
@@ -69,11 +68,11 @@ def warmup(gs_type, dataset, opt, pipe,
     # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
     if gs_type == "gs_mesh":
         # [TODO] Tricky part, but it is correct
-        textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+        textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, "pytorch3d")
         # if mesh_rasterizer_type == "pytorch3d":
-        #     textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+        #     textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, "pytorch3d")
         # elif mesh_rasterizer_type == "nvdiffrast":
-        #     textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
+        #     textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, "nvdiffrast")
     else:
         textured_mesh = None
     # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.

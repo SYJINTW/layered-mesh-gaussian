@@ -19,8 +19,9 @@ import time
 
 # >>>> [YC] add
 from games.mesh_splatting.scene.dataset_readers \
-    import get_num_splats_per_triangle, transform_vertices_function
+    import get_num_splats_per_triangle
 from games.mesh_splatting.utils.graphics_utils import MeshPointCloud
+import renderer.mesh_loader.mesh_loader as mesh_loader
 # <<< [YC] add
 
 from games.multi_mesh_splatting.utils.graphics_utils import MultiMeshPointCloud
@@ -137,6 +138,7 @@ def readColmapSingleMeshSceneInfo(
         textured_mesh = None,
         mesh_rasterizer_type: str = "nvdiffrast",
         mesh_background_color: tuple = (1.0, 1.0, 1.0),
+        resolution: int = -1,
         # <<< [YC] add
         llffhold=8):
     
@@ -177,22 +179,15 @@ def readColmapSingleMeshSceneInfo(
     
     if texture_obj_path is None:
         print(f"[INFO] DatasetReader::Reading Mesh object from {path}/mesh.obj")
-        mesh_scene = trimesh.load(f'{path}/mesh.obj', force='mesh')
+        mesh_scene = mesh_loader.load_transformed_mesh(f'{path}/mesh.obj')
     else:
         print(f"[INFO] Reading Mesh object from {texture_obj_path}")
-        mesh_scene = trimesh.load(texture_obj_path, force='mesh')
-    
-    mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-        angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-    ))
-    
-    vertices = mesh_scene.vertices
-    vertices = transform_vertices_function(
-        torch.tensor(vertices),
-    )
+        mesh_scene = mesh_loader.load_transformed_mesh(texture_obj_path)
+
+    vertices = torch.tensor(mesh_scene.vertices)
     faces = mesh_scene.faces
     triangles = vertices[torch.tensor(mesh_scene.faces).long()].float()
-    
+
     has_uv = (mesh_type == "sugar")
     
     print(f"[DEBUG] mesh_type: {mesh_type}, has_uv: {has_uv}")
@@ -241,6 +236,7 @@ def readColmapSingleMeshSceneInfo(
             mesh_type=mesh_type,
             mesh_rasterizer_type=mesh_rasterizer_type,
             mesh_background_color=mesh_background_color,
+            resolution=resolution,
         )
         # <<<< [SAM] Budgeting policy integration
         
@@ -350,7 +346,6 @@ def readColmapSingleMeshSceneInfo(
             normals=np.zeros((num_pts, 3)),
             vertices=vertices,
             faces=faces,
-            transform_vertices_function=transform_vertices_function,
             triangles=triangles.cuda(),
             triangle_indices=tri_indices
         )

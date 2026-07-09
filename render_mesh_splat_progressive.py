@@ -25,7 +25,7 @@ from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from games import gaussianModelRender, gaussianModel
 
-from train import load_textured_mesh, load_textured_mesh_for_nvdiffrast
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 import json
 import time
@@ -262,11 +262,8 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int,
     
     with torch.no_grad():
         gaussians = gaussianModel[gs_type](dataset.sh_degree)
-        if mesh_rasterizer_type == "pytorch3d":
-            textured_mesh = load_textured_mesh(dataset, texture_obj_path)
-        elif mesh_rasterizer_type == "nvdiffrast":
-            textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-            
+        textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, mesh_rasterizer_type)
+
         scene = SceneSimple(
             args=dataset, 
             gaussians=gaussians, 

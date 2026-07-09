@@ -18,13 +18,7 @@ from utils.sh_utils import eval_sh
 from renderer.mesh_renderer.mesh_renderer_pytorch3d import mesh_renderer_pytorch3d
 from renderer.mesh_renderer.mesh_renderer_nvdiffrast import mesh_renderer_nvdiffrast
 
-def transform_vertices_function(vertices, c=1):
-    vertices = vertices[:, [0, 2, 1]]
-    vertices[:, 1] = -vertices[:, 1]
-    vertices *= c
-    return vertices
-
-def render(viewpoint_camera, pc : GaussianModel, pipe, 
+def render(viewpoint_camera, pc : GaussianModel, pipe,
            bg_color: torch.Tensor = None, bg_depth: torch.Tensor = None,
            scaling_modifier = 1.0, override_color = None,
            mesh_background_color=(1.0, 1.0, 1.0), # [TODO] [DOING] enable black background

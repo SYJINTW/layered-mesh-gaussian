@@ -39,8 +39,7 @@ import numpy as np
 from pathlib import Path
 
 
-import renderer.mesh_loader.mesh_loader_pytorch3d as mesh_loader_pytorch3d
-import renderer.mesh_loader.mesh_loader_nvdiffrast as mesh_loader_nvdiffrast
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 # [good to have] loss-informed stop criteria
 LOSS_CONVG_THRESH = 0.01
@@ -67,12 +66,18 @@ def warmup(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, c
         
     # >>>> [YC] add: if there is textured mesh, load it here (before training loop)
     if gs_type == "gs_mesh":
-        # Always load via pytorch3d here: this copy is consumed as p3d_mesh by
-        # DistortionMapBudgetingPolicy (scene/budgeting.py), which requires a
-        # PyTorch3D Meshes object regardless of --mesh_rasterizer_type. The copy
-        # actually used for training/rendering is (re)loaded per-rasterizer below.
-        textured_mesh = mesh_loader_pytorch3d.load_textured_mesh_for_pytorch3d(dataset, texture_obj_path)
+        # p3d_mesh is always needed by DistortionMapBudgetingPolicy, regardless of
+        # --mesh_rasterizer_type. For colmap/milo, load once (transformed) and reuse
+        # the same in-memory mesh below for the actual training/rendering rasterizer,
+        # instead of re-reading the file a second time.
+        if dataset.mesh_type in ("colmap", "milo"):
+            mesh_scene = mesh_loader.load_transformed_mesh(texture_obj_path)
+            textured_mesh = mesh_loader.to_pytorch3d_meshes(mesh_scene)
+        else:
+            mesh_scene = None
+            textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, "pytorch3d")
     else:
+        mesh_scene = None
         textured_mesh = None
     # [DONE] pass the textured mesh, to Scene, Policy, renderer and such.
     # because, why pass the path when its already loaded right here?
@@ -90,13 +95,15 @@ def warmup(gs_type, dataset, opt, pipe, testing_iterations, saving_iterations, c
                 mesh_background_color=(1.0, 1.0, 1.0) if dataset.white_background else (0.0, 0.0, 0.0))
     gaussians.training_setup(opt)
 
-    # Reload the mesh matching the actual rasterizer used for training/rendering
-    # (the load above is pytorch3d-only, for the budgeting policy's internal needs).
+    # Assign the mesh matching the actual rasterizer used for training/rendering.
+    # For colmap/milo, reuses the in-memory mesh loaded above (no second disk read).
     if gs_type == "gs_mesh":
         if mesh_rasterizer_type == "pytorch3d":
             scene.textured_mesh = textured_mesh
-        elif mesh_rasterizer_type == "nvdiffrast":
-            scene.textured_mesh = mesh_loader_nvdiffrast.load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
+        elif mesh_scene is not None:
+            scene.textured_mesh = mesh_scene
+        else:
+            scene.textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, mesh_rasterizer_type)
 
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)

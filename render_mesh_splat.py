@@ -25,11 +25,7 @@ from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from games import gaussianModelRender
 
-from pytorch3d.io import load_objs_as_meshes
-import trimesh
-from pytorch3d.structures import Meshes
-from pytorch3d.renderer import TexturesVertex
-from train import load_textured_mesh, load_textured_mesh_for_nvdiffrast
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 import json
 import time
@@ -255,11 +251,8 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline :
     
     with torch.no_grad():
         gaussians = gaussianModelRender[gs_type](dataset.sh_degree)
-        if mesh_rasterizer_type == "pytorch3d":
-            textured_mesh = load_textured_mesh(dataset, texture_obj_path)
-        elif mesh_rasterizer_type == "nvdiffrast":
-            textured_mesh = load_textured_mesh_for_nvdiffrast(dataset, texture_obj_path)
-            
+        textured_mesh = mesh_loader.load_textured_mesh(dataset, texture_obj_path, mesh_rasterizer_type)
+
         # [BUG] trace from here to see how ply and policy are loaded
         scene = Scene(dataset, gaussians, 
                       load_iteration=iteration, shuffle=False,

@@ -27,17 +27,11 @@ from scene.dataset_readers import (
 )
 from utils.sh_utils import SH2RGB
 from scene.budgeting import get_budgeting_policy
+import renderer.mesh_loader.mesh_loader as mesh_loader
 
 from pathlib import Path
 
 softmax = torch.nn.Softmax(dim=2)
-
-
-def transform_vertices_function(vertices, c=1):
-    vertices = vertices[:, [0, 2, 1]]
-    vertices[:, 1] = -vertices[:, 1]
-    vertices *= c
-    return vertices
 
 
 def get_num_splats_per_triangle(
@@ -52,9 +46,10 @@ def get_num_splats_per_triangle(
     textured_mesh = None,
     mesh_type: str = "sugar",
     mesh_rasterizer_type: str = "nvdiffrast",
-    mesh_background_color: tuple = (1.0, 1.0, 1.0)
+    mesh_background_color: tuple = (1.0, 1.0, 1.0),
+    resolution: int = -1,
 )-> np.ndarray: # [N,], number of splats on each triangle
-    
+
     # define allocation_path only when policy_path provided
     allocation_path = Path(policy_path) if policy_path else None
 
@@ -63,9 +58,9 @@ def get_num_splats_per_triangle(
         print(f"[INFO] Loading splat allocation from: {allocation_path}")
         num_splats_per_triangle = np.load(allocation_path)
         print("[INFO] loaded distribution, max and min:", num_splats_per_triangle.max(), num_splats_per_triangle.min())
-    
+
     # [DONE] load weights here
-            
+
     # Use budgeting policy, computing on-the-fly
     elif total_splats is not None:
         print(f"[INFO] no pre-computed policy found")
@@ -81,6 +76,7 @@ def get_num_splats_per_triangle(
             p3d_mesh=textured_mesh,
             mesh_rasterizer_type=mesh_rasterizer_type,
             mesh_background_color=mesh_background_color,
+            resolution=resolution,
         )
         num_splats_per_triangle = budgeting_policy.allocate(
             total_splats=total_splats,
@@ -218,7 +214,8 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         textured_mesh = None,
         preload_gs_path: str = None,
         mesh_rasterizer_type: str = "nvdiffrast",
-        mesh_background_color: tuple = (1.0, 1.0, 1.0)
+        mesh_background_color: tuple = (1.0, 1.0, 1.0),
+        resolution: int = -1,
 ) -> SceneInfo:
     # ------------------------------- Read cameras ------------------------------- #
     print("[INFO] DatasetReader::Reading Training Transforms")
@@ -234,30 +231,17 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     # ----------------------------- Load texture mesh ---------------------------- #
-    # not priority for now: clean all the mesh loading logic into one place.
-    # [DONE] a workaround to send loaded-texture-mesh to budgeting.py
     if texture_obj_path is None:
         print(f"[INFO] DatasetReader::Reading Mesh object from {path}/mesh.obj")
-        mesh_scene = trimesh.load(f'{path}/mesh.obj', force='mesh')
+        mesh_scene = mesh_loader.load_transformed_mesh(f'{path}/mesh.obj')
     else:
         print(f"[INFO] DatasetReader::Reading Mesh object from {texture_obj_path}")
-        mesh_scene = trimesh.load(texture_obj_path, force='mesh')
+        mesh_scene = mesh_loader.load_transformed_mesh(texture_obj_path)
 
-    # -------------------------- Transform texture mesh -------------------------- #
-    # >>>> [YC] add
-    # [YC] [NOTE]: because the MILO's mesh is generated from torch3d, so need to rotate
-    mesh_scene.apply_transform(trimesh.transformations.rotation_matrix(
-        angle=-np.pi/2, direction=[1, 0, 0], point=[0, 0, 0]
-    ))
-    # <<<< [YC] add
-    
-    vertices = mesh_scene.vertices
-    vertices = transform_vertices_function(
-        torch.tensor(vertices),
-    )
+    vertices = torch.tensor(mesh_scene.vertices)
     faces = mesh_scene.faces
     triangles = vertices[torch.tensor(mesh_scene.faces).long()].float()
-    
+
     # >>>> [YC] add
     # [YC] [NOTE]: set to false support mesh from colmap; otherwise true for sugar-generated mesh
     has_uv = (mesh_type == "sugar")
@@ -293,9 +277,8 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
         assert budget_per_tri is not None or total_splats is not None, "Either num_splats or total_splats must be provided for budgeting!"
         
         if total_splats is None:
-            # total_splats = int(budget_per_tri * triangles.shape[0])
-            # print(f"[INFO] total_splats not provided, computed from budget_per_tri: {total_splats} splats")
-            pass
+            total_splats = int(budget_per_tri * triangles.shape[0])
+            print(f"[INFO] total_splats not provided, computed from budget_per_tri: {total_splats} splats")
         else:
             print(f"[INFO] total_splats is provided: {total_splats} splats")
         
@@ -313,6 +296,7 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
             mesh_type=mesh_type,
             mesh_rasterizer_type=mesh_rasterizer_type,
             mesh_background_color=mesh_background_color,
+            resolution=resolution,
         )
         print(f"[INFO] num_splats_per_triangle: {num_splats_per_triangle}")
         # <<<< [SAM] Budgeting policy integration
@@ -426,7 +410,6 @@ def readNerfSyntheticMeshInfo( # don't use num_splats
             normals=np.zeros((num_pts, 3)),
             vertices=vertices,
             faces=faces,
-            transform_vertices_function=transform_vertices_function,
             triangles=triangles.cuda(),
             triangle_indices=tri_indices
         )
@@ -552,7 +535,6 @@ def create_init_point_cloud(
         normals=np.zeros((num_pts, 3)),
         vertices=vertices,
         faces=faces,
-        transform_vertices_function=transform_vertices_function,
         triangles=triangles.cuda(),
         triangle_indices=tri_indices,
         num_splats_per_triangle=num_splats_per_triangle,
