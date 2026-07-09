@@ -14,11 +14,12 @@
 from arguments import OptimizationParams
 from arguments_games import (
     OptimizationParamsMesh,
+    OptimizationParamsMeshHover,
     OptimizationParamsFlame,
 )
 
 from scene.gaussian_model import GaussianModel
-from games.mesh_splatting.scene.gaussian_mesh_model import GaussianMeshModel, LMGModel
+from games.mesh_splatting.scene.gaussian_mesh_model import GaussianMeshModel, LMGModel, LMGModelHover
 from games.multi_mesh_splatting.scene.gaussian_multi_mesh_model import GaussianMultiMeshModel
 from games.flame_splatting.scene.gaussian_flame_model import GaussianFlameModel
 from games.flat_splatting.scene.points_gaussian_model import PointsGaussianModel
@@ -30,6 +31,7 @@ optimizationParamTypeCallbacks = {
     "gs_flat": OptimizationParams,
     "gs_mesh": OptimizationParamsMesh,
     "lmg": OptimizationParamsMesh, # [YC] add
+    "lmg_hover": OptimizationParamsMeshHover, # [Sam]
     "gs_flame": OptimizationParamsFlame
 }
 
@@ -38,6 +40,7 @@ gaussianModel = {
     "gs_flat": FlatGaussianModel,
     "gs_mesh": GaussianMeshModel, #! [YC] LMG
     "lmg": LMGModel, #! [YC] LMG
+    "lmg_hover": LMGModelHover, # [Sam] LMG
     "gs_multi_mesh": GaussianMultiMeshModel,
     "gs_flame": GaussianFlameModel,
     "gs_points": PointsGaussianModel

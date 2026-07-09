@@ -29,6 +29,12 @@ class OptimizationParamsMesh(ParamGroup):
         super().__init__(parser, "Optimization Parameters")
 
 
+class OptimizationParamsMeshHover(OptimizationParamsMesh):
+    def __init__(self, parser):
+        self.hover_lr = 0.001
+        super().__init__(parser)
+
+
 class OptimizationParamsFlame(ParamGroup):
     def __init__(self, parser):
         self.iterations = 30_000

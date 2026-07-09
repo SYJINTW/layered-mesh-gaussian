@@ -262,7 +262,7 @@ class SceneSimple(Scene):
         #! [YC] XXX
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             #! [YC] XXX
-            if args.gs_type == "lmg": #! [YC] need to be aware of gs_type
+            if args.gs_type in ("lmg", "lmg_hover"): #! [YC] need to be aware of gs_type
                 print("[INFO] Found transforms_train.json file, assuming Blender_Mesh dataset!")
                 # [NOTE] This step only load cameras
                 scene_info = sceneLoadTypeCallbacks["Blender_Mesh_Simple"](

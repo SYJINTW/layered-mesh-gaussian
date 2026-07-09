@@ -761,5 +761,91 @@ class LMGModel(GaussianModel):
                 if param is not None and param.requires_grad:
                     param.register_hook(freeze_hook)
                     
-        print(f"[Info] 成功凍結了 {len(frozen_indices)} / {total_num} 個 Gaussians！")  
-        
+        print(f"[Info] 成功凍結了 {len(frozen_indices)} / {total_num} 個 Gaussians！")
+
+
+class LMGModelHover(LMGModel):
+    """
+    LMGModel variant with an additive MaGS-style hover offset:
+        xyz = surface_xyz(alpha) + sigmoid(hover) * face_normal * hover_scale
+    surface_xyz(alpha) is computed exactly as in LMGModel (byte-identical,
+    still detached -- vertices/alpha remain non-trainable, unchanged from
+    LMGModel). _hover is the only new trainable parameter and the only
+    thing here NOT detached.
+    """
+
+    def __init__(self, sh_degree: int):
+        super().__init__(sh_degree)
+        self._hover = None
+        self.hover_activation = torch.sigmoid
+        self.hover_init_scale = 1e-2
+
+    def _init_hover(self, num_pts):
+        raw = inverse_sigmoid(
+            torch.rand(num_pts, 1, device="cuda") * self.hover_init_scale + self.eps_s0
+        )
+        self._hover = nn.Parameter(raw.requires_grad_(True))
+
+    def _face_normals_and_hover_scales(self, triangles):
+        edge_12 = triangles[:, 1] - triangles[:, 0]
+        edge_13 = triangles[:, 2] - triangles[:, 0]
+        normals = torch.linalg.cross(edge_12, edge_13, dim=1)
+        normal_norm = torch.linalg.vector_norm(normals, dim=-1, keepdim=True)
+        unit_normals = normals / (normal_norm + self.eps_s0)
+
+        edge_12_norm = torch.linalg.vector_norm(edge_12, dim=-1, keepdim=True)
+        edge_13_norm = torch.linalg.vector_norm(edge_13, dim=-1, keepdim=True)
+        hover_scales = edge_12_norm * edge_13_norm / (normal_norm + self.eps_s0)
+        return unit_normals, hover_scales
+
+    def _calc_xyz(self):
+        triangle_idx = self.triangles[self.triangle_indices].detach()  # constants
+        surface_xyz = torch.bmm(self.alpha.unsqueeze(1), triangle_idx).squeeze(1).detach()
+        if self._hover is None:
+            self._xyz = surface_xyz
+            return
+        normals, hover_scales = self._face_normals_and_hover_scales(self.triangles.detach())
+        hover_offset = (
+            self.hover_activation(self._hover)
+            * normals[self.triangle_indices]
+            * hover_scales[self.triangle_indices]
+        )
+        self._xyz = surface_xyz + hover_offset
+
+    def create_from_pcd(self, pcd: MeshPointCloud, spatial_lr_scale: float):
+        super().create_from_pcd(pcd, spatial_lr_scale)
+        self._init_hover(self._alpha.shape[0])
+        self.update_alpha()
+
+    def load_lmg_gs(self, path, vertices, faces, alpha_path=None, trainable=True):
+        super().load_lmg_gs(path, vertices, faces, alpha_path, trainable)
+        path_model = path.replace('point_cloud.ply', 'model_params.pt')
+        params = torch.load(path_model)
+        if '_hover' in params:
+            self._hover = nn.Parameter(params['_hover'])
+        else:
+            self._init_hover(self._alpha.shape[0])
+        self.update_alpha()
+        self.prepare_scaling_rot()
+
+    def save_ply(self, path):
+        super().save_ply(path)
+        path_model = path.replace('point_cloud.ply', 'model_params.pt')
+        save_dict = torch.load(path_model)
+        save_dict['_hover'] = self._hover
+        torch.save(save_dict, path_model)
+
+    def training_setup(self, training_args):
+        super().training_setup(training_args)
+        self.optimizer.add_param_group(
+            {'params': [self._hover], 'lr': training_args.hover_lr, "name": "hover"}
+        )
+
+    def setup_frozen_mask(self, frozen_indices):
+        super().setup_frozen_mask(frozen_indices)
+        if self._hover is not None and self._hover.requires_grad:
+            def freeze_hook(grad):
+                new_grad = grad.clone()
+                new_grad[self.frozen_mask] = 0.0
+                return new_grad
+            self._hover.register_hook(freeze_hook)

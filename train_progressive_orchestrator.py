@@ -195,8 +195,16 @@ def grow_splats(gaussians, scene, dataset, opt, pipe, round_idx, policy_path,
                 total_gaussians._features_rest[t_sl] = foundation._features_rest[f_sl]
                 total_gaussians._opacity[t_sl] = foundation._opacity[f_sl]
                 total_gaussians.round_id[t_sl] = foundation.round_id[f_sl]
+                if hasattr(total_gaussians, '_hover') and total_gaussians._hover is not None:
+                    total_gaussians._hover[t_sl] = foundation._hover[f_sl]
             cur_foundation_idx += num_foundation
             cur_total_idx += num_total
+
+    # Hover offsets for the just-copied prefix were patched in-place above; refresh
+    # cached _xyz/_scaling so the first render of this round reflects them (no-op
+    # for non-hover gs_types since nothing else in the loop touched alpha/vertices/scale).
+    total_gaussians.update_alpha()
+    total_gaussians.prepare_scaling_rot()
 
     scene.gaussians = total_gaussians
     return total_gaussians, total_num_splats_per_triangle
