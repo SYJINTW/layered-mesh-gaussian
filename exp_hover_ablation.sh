@@ -42,7 +42,22 @@ case "$SCENE" in
         IMAGES="-i images_4"
         BUDGETS=(320000)  # matches bicycle's established single-budget convention this session
         ;;
-    *) echo "unknown scene: $SCENE (expected hotdog|hotdog_colmap|bicycle)"; exit 1 ;;
+    bicycle_colmap)
+        DATASET_DIR="$DATASET_BASE_DIR/bicycle"
+        MESH_FILE="$SCRIPT_DIR/dataset/colmap/bicycle/downsampled_30/mesh.ply"
+        MESH_IMG_DIR="$SCRIPT_DIR/dataset/colmap/bicycle/downsampled_30_lmg_precapture"
+        MESH_TYPE="colmap"
+        IMAGES="-i images_4"
+        BUDGETS=(320000)  # matches bicycle's established single-budget convention this session
+        ;;
+    ship)
+        DATASET_DIR="$DATASET_BASE_DIR/ship"
+        MESH_FILE="$MESH_BASE_DIR/ship/ship.ply"
+        MESH_IMG_DIR="$MESH_BASE_DIR/ship"
+        MESH_TYPE="milo"
+        BUDGETS=(80000 160000 320000)
+        ;;
+    *) echo "unknown scene: $SCENE (expected hotdog|hotdog_colmap|bicycle|bicycle_colmap|ship)"; exit 1 ;;
 esac
 PY() { conda run -n lmg python "$@"; }
 

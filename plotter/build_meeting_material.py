@@ -203,13 +203,25 @@ def cmd_allocation(args):
 
 # ---------------------------------------------------------------------------
 def cmd_hover(args):
-    """PSNR/SSIM vs splat budget, lmg vs lmg_hover, for one mesh source."""
+    """PSNR/SSIM vs splat budget, lmg vs lmg_hover, for one mesh source.
+    Includes a shared #GS=0 (mesh-only) baseline point from mesh_baseline.json."""
     root = Path(args.root)
     budgets = sorted(int(p.name.split("_")[-2]) for p in root.glob(f"{args.mesh_tag}_*_lmg")
                       if p.name.split("_")[-2].isdigit())
+
+    mesh_psnr = mesh_ssim = None
+    for b in budgets:
+        bf = root / f"{args.mesh_tag}_{b}_lmg" / "mesh_baseline.json"
+        if bf.exists():
+            mb = json.load(open(bf))
+            mesh_psnr, mesh_ssim = mb["PSNR"], mb["SSIM"]
+            break
+
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     for gs_type, color in (("lmg", "tab:gray"), ("lmg_hover", "tab:red")):
         xs, psnrs, ssims = [], [], []
+        if mesh_psnr is not None:
+            xs.append(0); psnrs.append(mesh_psnr); ssims.append(mesh_ssim)
         for b in budgets:
             d = root / f"{args.mesh_tag}_{b}_{gs_type}"
             rf = d / "results_lmg.json"
