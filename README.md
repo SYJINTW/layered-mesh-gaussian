@@ -28,6 +28,28 @@ See [DATASET.md](doc/DATASET.md) for instructions dataset.
 
 ## Getting Started
 
+### First-Time Setup: Machine-Specific Paths
+
+`exp_sample.sh` and `exp_progressive_lmg.sh` source an untracked `env.local.sh` for dataset/mesh paths — copy the example and edit it to your machine before running either script:
+
+```bash
+cp env.local.sh.example env.local.sh
+```
+
+```bash
+# env.local.sh
+DATASET_BASE_DIR="/path/to/dataset"          # contains <scene>/ image folders
+MESH_BASE_DIR="/path/to/dataset/milo_meshes" # contains <scene>/<scene>.ply + mesh_texture/ mesh_depth/
+```
+
+Both scripts fail fast with a clear error if `env.local.sh` is missing or the vars are unset.
+
+Also edit these at the top of whichever script you run:
+
+- `CUDA_VISIBLE_DEVICES` — pick a free GPU (see "Before launching new GPU work" convention: check `nvidia-smi` first on a shared machine, don't assume GPU 0/1 is free).
+- `EXP_NAME` — your experiment name, used in `output/{EXP_NAME}/...` and `log/{EXP_NAME}/...` paths.
+- `SCENE_NAME_LIST` — scenes to run.
+
 ### Quick Start: Full Pipeline
 
 To run the complete pipeline (Warmup → Training → Rendering → Metrics) with the default scene, policy, and budget, run the following command:
@@ -37,6 +59,26 @@ bash exp_sample.sh
 ```
 
 > **Note:** You can configure the specific experiment settings (Scene, Policy, Budget) by editing the variables defined at the top of `exp_sample.sh`.
+
+### LMG++: Progressive Multi-Round Training
+
+LMG++ (`--gs_type lmg`) is the current main model: splats grow over multiple rounds, with each round freezing the splats from previous rounds. `train_progressive_orchestrator.py` runs all rounds in a single in-memory process (no per-round checkpoint round-trip):
+
+```bash
+conda run -n lmg python train_progressive_orchestrator.py --eval \
+  -s <dataset_dir> -m <output_dir> \
+  --texture_obj_path <mesh.ply> --mesh_type milo \
+  --gs_type lmg --alloc_policy distortion_progressive \
+  --precaptured_mesh_img_path <mesh_img_dir> --occlusion \
+  --mesh_rasterizer_type nvdiffrast \
+  --rounds 4 --total_splats 32000 --iters_per_round 8000 \
+  --schedule linear --fixed_alpha --skip_lpips
+```
+
+- `--gs_type lmg_hover` selects the MaGS-style hover-offset variant (`LMGModelHover`, extends `LMGModel`).
+- `--schedule` controls how `--total_splats` is split across rounds: `linear` (default), `quadratic`/`exponential` (back-loaded), `logarithmic` (front-loaded), `random` (needs `--seed`).
+- `--alloc_policy distortion_progressive` is the distortion policy adapted for progressive multi-round allocation.
+- `exp_progressive_lmg.sh` is the legacy bash-loop driver (4 cold process spawns per round); the orchestrator is the current entry point for new runs. It also sources `env.local.sh` — see "First-Time Setup" above — and has its own `CUDA_VISIBLE_DEVICES`/`EXP_NAME`/`SCENE_NAME_LIST` to edit at the top.
 
 ### Output Structure
 
@@ -277,7 +319,7 @@ python metrics.py \
 
 | Argument           | Description                                                    | Default   |
 | ------------------ | -------------------------------------------------------------- | --------- |
-| `--gs_type`        | Renderer type: `gs`, `gs_flat`, or `gs_mesh`                   | `gs_mesh` |
+| `--gs_type`        | Renderer type: `gs`, `gs_flat`, `gs_mesh`, `lmg`, or `lmg_hover` | `gs_mesh` |
 | `--total_splats`   | Total number of splats for entire scene, int                   | None      |
 | `--budget_per_tri` | Splats per triangle (multiplier), float                        | 1.0       |
 | `--alloc_policy`   | Policy: `uniform`, `random`, `area`, `planarity`, `distortion` | `area`    |
