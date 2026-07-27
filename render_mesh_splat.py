@@ -234,9 +234,7 @@ def render_set(gs_type, model_path, name, iteration, views, gaussians, pipeline,
             torchvision.utils.save_image(rendering, os.path.join(debug_path, '{0:05d}_rendering'.format(idx) + ".png"))
             torchvision.utils.save_image(gt, os.path.join(debug_path, '{0:05d}_gt'.format(idx) + ".png"))
         # <<<< [YC] add for debug images
-        
-        break
-        
+
 # sets are {train,test, (val)}
 def render_sets(gs_type: str, dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,
                 # >>>> [YC] add

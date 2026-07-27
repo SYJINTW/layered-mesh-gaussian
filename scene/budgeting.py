@@ -71,7 +71,7 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         # "rand_norm": RandomNormalBudgetingPolicy,
         "area": AreaBasedBudgetingPolicy,
         
-        # [TODO] try different #hops, then change this to the optimal candidate
+        # try different #hops, then change this default one to the optimal candidate
         "planarity": partial(PlanarityBasedBudgetingPolicy, hops=1), 
         
         # expose more interfaces instead of hardcoding and manually testing
@@ -79,7 +79,7 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "planarity2": partial(PlanarityBasedBudgetingPolicy, hops=2),
         "planarity3": partial(PlanarityBasedBudgetingPolicy, hops=3),
         
-        # same, use partial to set focus or other params
+        # same, use partial to set specific params
         "texture": None, 
         "texture_focus": None,
         "texture_avoid": None,
@@ -88,6 +88,7 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "distortion_progressive": ProgressiveDistortionMapBudgetingPolicy,
         "distortion_no_avg": partial(DistortionMapBudgetingPolicy, is_averaging_across_views=False),
 
+        # [TODO] re-design
         "mixed": partial(MixedBudgetingPolicy),
         
         "mixed_v3g1": partial(MixedBudgetingPolicy, weight_visual=0.75, weight_geometry=0.25), 
