@@ -178,88 +178,131 @@ def print_stats(scene: str, cue: str, w: np.ndarray):
 
 def plot_distributions(scene: str, cues: dict):
     n = len(cues)
-    fig, axes = plt.subplots(1, n, figsize=(4 * n, 3.5))
-    if n == 1:
-        axes = [axes]
+    ncols = 4
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6.5 * ncols, 5.5 * nrows))
+    axes = np.atleast_1d(axes).flatten()
+
     for ax, (name, w) in zip(axes, cues.items()):
         wl = np.log10(w + EPS)
-        ax.hist(wl, bins=80, density=True, alpha=0.5, color="steelblue")
+        ax.hist(wl, bins=80, density=True, alpha=0.45, color="steelblue")
         try:
             kde = gaussian_kde(wl)
             xs = np.linspace(wl.min(), wl.max(), 300)
-            ax.plot(xs, kde(xs), color="darkred", lw=1.5)
+            ax.plot(xs, kde(xs), color="darkred", lw=2.5)
         except Exception as e:
-            ax.set_title(f"{name}\n(KDE failed: {e})", fontsize=8)
-        ax.set_title(name, fontsize=10)
-        ax.set_xlabel("log10(weight)")
-    fig.suptitle(f"{scene}: per-cue weight distribution (log10 scale)")
+            ax.text(0.5, 0.5, f"KDE failed: {e}", transform=ax.transAxes, ha="center", fontsize=11)
+        ax.set_title(name, fontsize=20, fontweight="bold", pad=10)
+        ax.set_xlabel("log10(weight)", fontsize=15)
+        ax.set_ylabel("density", fontsize=15)
+        ax.tick_params(axis="both", labelsize=13)
+        ax.grid(alpha=0.25)
+
+    for ax in axes[n:]:
+        ax.axis("off")
+
+    fig.suptitle(f"{scene}: per-cue weight distribution (log10 scale)", fontsize=24, y=1.01)
     fig.tight_layout()
     out = OUT_DIR / f"{scene}_distributions.png"
-    fig.savefig(out, dpi=130)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {out}")
 
 
 def plot_correlation_heatmaps(scene: str, cues: dict):
     names = list(cues.keys())
-    mat_pearson = np.eye(len(names))
-    mat_spearman = np.eye(len(names))
-    for i in range(len(names)):
-        for j in range(i + 1, len(names)):
+    n = len(names)
+    mat_pearson = np.eye(n)
+    mat_spearman = np.eye(n)
+    for i in range(n):
+        for j in range(i + 1, n):
             wi, wj = cues[names[i]], cues[names[j]]
             r = np.corrcoef(wi, wj)[0, 1]
             rho, _ = spearmanr(wi, wj)
             mat_pearson[i, j] = mat_pearson[j, i] = r
             mat_spearman[i, j] = mat_spearman[j, i] = rho
 
-    fig, axes = plt.subplots(1, 2, figsize=(6 + len(names), 3.2))
+    cell = 1.15  # inches per matrix cell -- scales the figure so text never gets crammed
+    fig, axes = plt.subplots(1, 2, figsize=(2 * (n * cell + 2.5), n * cell + 2.0))
     for ax, mat, title in [(axes[0], mat_pearson, "Pearson r"), (axes[1], mat_spearman, "Spearman rho")]:
         im = ax.imshow(mat, vmin=-1, vmax=1, cmap="RdBu_r")
-        ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
-        ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=8)
-        for i in range(len(names)):
-            for j in range(len(names)):
-                ax.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center", fontsize=7)
-        ax.set_title(title)
-        fig.colorbar(im, ax=ax, fraction=0.046)
-    fig.suptitle(f"{scene}: full-population cue correlation (not top-k truncated)")
+        ax.set_xticks(range(n)); ax.set_xticklabels(names, rotation=45, ha="right", fontsize=15)
+        ax.set_yticks(range(n)); ax.set_yticklabels(names, fontsize=15)
+        for i in range(n):
+            for j in range(n):
+                val = mat[i, j]
+                color = "white" if abs(val) > 0.6 else "black"
+                weight = "bold" if abs(val) > 0.3 and i != j else "normal"
+                ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=16,
+                        color=color, fontweight=weight)
+        ax.set_title(title, fontsize=22, pad=14)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046)
+        cbar.ax.tick_params(labelsize=13)
+    fig.suptitle(f"{scene}: full-population cue correlation (not top-k truncated)", fontsize=22, y=1.03)
     fig.tight_layout()
     out = OUT_DIR / f"{scene}_correlation.png"
-    fig.savefig(out, dpi=130)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {out}")
 
 
+CACHE_DIR = OUT_DIR / "_cue_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def compute_cues(scene: str, cfg: dict) -> dict:
+    """All the expensive per-scene work (mesh load, sparse hop-adjacency, BFS-equivalent
+    reachability -- the part that takes ~9min on bicycle's 8.8M faces). Cached to disk
+    keyed by scene name; re-run only wipes plots, never silently re-triggers this."""
+    mesh = trimesh.load(cfg["mesh_path"], process=False)
+    A = build_face_adjacency(mesh)
+
+    cues = {}
+    cues["area"] = compute_area(mesh)
+    for hops in (1, 2, 3):
+        cues[f"planarity{hops}"] = compute_planarity(mesh, A, hops)
+    cues["vertex_color_disp2"] = compute_vertex_color_dispersion(mesh, A, hops=2)
+
+    dist_path = cfg["distortion_cache"]
+    if os.path.exists(dist_path):
+        cues["distortion"] = np.load(dist_path).astype(np.float32)
+        if len(cues["distortion"]) != mesh.faces.shape[0]:
+            print(f"  [WARNING] distortion cache length {len(cues['distortion'])} != "
+                  f"mesh face count {mesh.faces.shape[0]}, dropping cue for this scene")
+            del cues["distortion"]
+    else:
+        print(f"  [WARNING] no distortion cache at {dist_path}, skipping distortion for {scene}")
+
+    try:
+        if cfg["cam_type"] == "blender":
+            centers = load_blender_camera_centers(cfg["dataset_path"])
+        else:
+            centers = load_colmap_camera_centers(cfg["dataset_path"])
+        cues["screen_footprint*"] = compute_screen_footprint(mesh, centers)
+    except Exception as e:
+        print(f"  [WARNING] screen_footprint failed ({e}), skipping (exploratory cue only)")
+
+    return cues
+
+
+def load_or_compute_cues(scene: str, cfg: dict, recompute: bool) -> dict:
+    cache_path = CACHE_DIR / f"{scene}.npz"
+    if cache_path.exists() and not recompute:
+        print(f"  [cache] loading cues from {cache_path} (pass --recompute to force)")
+        npz = np.load(cache_path)
+        return {name: npz[name] for name in npz.files}
+
+    cues = compute_cues(scene, cfg)
+    np.savez(cache_path, **cues)
+    print(f"  [cache] wrote {cache_path}")
+    return cues
+
+
 def main():
+    recompute = "--recompute" in sys.argv
     for scene, cfg in SCENES.items():
         print(f"\n=== {scene} ===")
-        mesh = trimesh.load(cfg["mesh_path"], process=False)
-        A = build_face_adjacency(mesh)
-
-        cues = {}
-        cues["area"] = compute_area(mesh)
-        for hops in (1, 2, 3):
-            cues[f"planarity{hops}"] = compute_planarity(mesh, A, hops)
-        cues["vertex_color_disp2"] = compute_vertex_color_dispersion(mesh, A, hops=2)
-
-        dist_path = cfg["distortion_cache"]
-        if os.path.exists(dist_path):
-            cues["distortion"] = np.load(dist_path).astype(np.float32)
-            if len(cues["distortion"]) != mesh.faces.shape[0]:
-                print(f"  [WARNING] distortion cache length {len(cues['distortion'])} != "
-                      f"mesh face count {mesh.faces.shape[0]}, dropping cue for this scene")
-                del cues["distortion"]
-        else:
-            print(f"  [WARNING] no distortion cache at {dist_path}, skipping distortion for {scene}")
-
-        try:
-            if cfg["cam_type"] == "blender":
-                centers = load_blender_camera_centers(cfg["dataset_path"])
-            else:
-                centers = load_colmap_camera_centers(cfg["dataset_path"])
-            cues["screen_footprint*"] = compute_screen_footprint(mesh, centers)
-        except Exception as e:
-            print(f"  [WARNING] screen_footprint failed ({e}), skipping (exploratory cue only)")
+        cues = load_or_compute_cues(scene, cfg, recompute)
 
         for name, w in cues.items():
             print_stats(scene, name, w)

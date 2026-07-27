@@ -70,7 +70,9 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "random": RandomUniformBudgetingPolicy, # turns out to be better than naive Uniform
         # "rand_norm": RandomNormalBudgetingPolicy,
         "area": AreaBasedBudgetingPolicy,
-        
+        "screen_footprint": ScreenFootprintBudgetingPolicy,
+        "vertex_color_disp2": partial(VertexColorDispersionBudgetingPolicy, hops=2),
+
         # try different #hops, then change this default one to the optimal candidate
         "planarity": partial(PlanarityBasedBudgetingPolicy, hops=1), 
         
@@ -89,12 +91,23 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "distortion_no_avg": partial(DistortionMapBudgetingPolicy, is_averaging_across_views=False),
 
         # [TODO] re-design
-        "mixed": partial(MixedBudgetingPolicy),
-        
-        "mixed_v3g1": partial(MixedBudgetingPolicy, weight_visual=0.75, weight_geometry=0.25), 
-        "mixed_v2g2": partial(MixedBudgetingPolicy, weight_visual=0.5, weight_geometry=0.5), 
-        "mixed_v1g3": partial(MixedBudgetingPolicy, weight_visual=0.25, weight_geometry=0.75), 
-        
+        "mixed_area": partial(MixedBudgetingPolicy),
+
+        "mixed_area_v3g1": partial(MixedBudgetingPolicy, weight_visual=0.75, weight_geometry=0.25),
+        "mixed_area_v2g2": partial(MixedBudgetingPolicy, weight_visual=0.5, weight_geometry=0.5),
+        "mixed_area_v1g3": partial(MixedBudgetingPolicy, weight_visual=0.25, weight_geometry=0.75),
+
+        # distortion + vertex_color_disp2 fusion (2026-07-27): area's raw weight was found
+        # near-degenerate on tested meshes (min-max normalization squashes it to near-zero
+        # contribution); vertex_color_disp2 has real, scene-invariant near-zero correlation
+        # with distortion across synthetic + real scenes (unlike planarity, whose relationship
+        # to distortion flips sign between scene types) -- see worklog.
+        "mixed_colordisp": partial(MixedBudgetingPolicy, geometry_policy_name="vertex_color_disp2"),
+        "mixed_colordisp_v3g1": partial(MixedBudgetingPolicy, geometry_policy_name="vertex_color_disp2",
+                                         weight_visual=0.75, weight_geometry=0.25),
+        "mixed_colordisp_v1g3": partial(MixedBudgetingPolicy, geometry_policy_name="vertex_color_disp2",
+                                         weight_visual=0.25, weight_geometry=0.75),
+
         # "from_file": None, # currently handled in dataset_reader::get_num_splats_per_triangle
     }
     try:
@@ -207,40 +220,42 @@ class MixedBudgetingPolicy(BudgetingPolicy):
     namely, a convex combination.
     """
     
-    def __init__(self, mesh: trimesh.Trimesh, 
-                 weight_visual: float = 0.5, 
-                 weight_geometry: float = 0.5, 
-                 dataset_path: str = None, 
+    def __init__(self, mesh: trimesh.Trimesh,
+                 weight_visual: float = 0.5,
+                 weight_geometry: float = 0.5,
+                 dataset_path: str = None,
                  mesh_type: str = None,
+                 geometry_policy_name: str = "area",
                  **kwargs):
-        
+
         super().__init__(mesh, **kwargs)
-        
+
         assert 0.0 <= weight_visual <= 1.0, "weight_visual must be in [0,1]"
         assert 0.0 <= weight_geometry <= 1.0, "weight_geometry must be in [0,1]"
         assert abs(weight_visual + weight_geometry - 1.0) < EPS, \
             f"weight_visual ({weight_visual}) and weight_geometry ({weight_geometry}) must sum to 1.0"
         assert dataset_path is not None, \
             "MixedBudgetingPolicy requires dataset_path to load weights from file."
-        
+
         self.weight_visual = weight_visual
         self.weight_geometry = weight_geometry
         self.dataset_path = dataset_path
         self.mesh_type = mesh_type
-        
+        self.geometry_policy_name = geometry_policy_name
+
         # Load weights (importance score of each triangle) from files
-        area_weights, distortion_weights = self._load_weights()
-        
+        geometry_weights, distortion_weights = self._load_weights()
+
         # just assert, DO NOT fall back
-        assert  (area_weights is not None) and (distortion_weights is not None), \
+        assert  (geometry_weights is not None) and (distortion_weights is not None), \
             "Failed to load weights for MixedBudgetingPolicy."
         # Normalize weights to [0, 1] before mixing
-        area_norm = self._normalize_weights(area_weights)
+        geometry_norm = self._normalize_weights(geometry_weights)
         distortion_norm = self._normalize_weights(distortion_weights)
-        
+
         # Compute weighted average
         mixed_weights = (
-            self.weight_geometry * area_norm + 
+            self.weight_geometry * geometry_norm +
             self.weight_visual * distortion_norm
         )
         
@@ -275,32 +290,32 @@ class MixedBudgetingPolicy(BudgetingPolicy):
         mt = self.mesh_type
         # [TODO] fix hardcoded
         policy_base = os.path.join(self.dataset_path, "policy", f"mesh_{mt}", f"tri_{num_tri}")
-        
-        area_path = os.path.join(policy_base, "area", "weights.npy")
+
+        geometry_path = os.path.join(policy_base, self.geometry_policy_name, "weights.npy")
         distortion_path = os.path.join(policy_base, "distortion", "weights.npy")
-        
+
         print(f"[INFO] MixedBudgetingPolicy::load() Loading weights for {num_tri} triangles")
-        print(f"[INFO]   Area weights from: {area_path}")
+        print(f"[INFO]   {self.geometry_policy_name} weights from: {geometry_path}")
         print(f"[INFO]   Distortion weights from: {distortion_path}")
-        
-        # Load area weights
-        area_weights = None
-        if os.path.exists(area_path):
+
+        # Load geometry-cue weights
+        geometry_weights = None
+        if os.path.exists(geometry_path):
             try:
-                area_weights = np.load(area_path).astype(np.float32)
-                if len(area_weights) != num_tri:
-                    print(f"[ERROR] Area weights length mismatch: "
-                          f"expected {num_tri}, got {len(area_weights)}")
-                    area_weights = None
+                geometry_weights = np.load(geometry_path).astype(np.float32)
+                if len(geometry_weights) != num_tri:
+                    print(f"[ERROR] {self.geometry_policy_name} weights length mismatch: "
+                          f"expected {num_tri}, got {len(geometry_weights)}")
+                    geometry_weights = None
                 else:
-                    print(f"[INFO] Loaded area weights: shape={area_weights.shape}, "
-                          f"range=[{area_weights.min():.4f}, {area_weights.max():.4f}]")
+                    print(f"[INFO] Loaded {self.geometry_policy_name} weights: shape={geometry_weights.shape}, "
+                          f"range=[{geometry_weights.min():.4f}, {geometry_weights.max():.4f}]")
             except Exception as e:
-                print(f"[ERROR] Failed to load area weights: {e}")
-                area_weights = None
+                print(f"[ERROR] Failed to load {self.geometry_policy_name} weights: {e}")
+                geometry_weights = None
         else:
-            print(f"[ERROR] Area weights file not found: {area_path}")
-        
+            print(f"[ERROR] {self.geometry_policy_name} weights file not found: {geometry_path}")
+
         # Load distortion weights
         distortion_weights = None
         if os.path.exists(distortion_path):
@@ -319,7 +334,7 @@ class MixedBudgetingPolicy(BudgetingPolicy):
         else:
             print(f"[ERROR] Distortion weights file not found: {distortion_path}")
         
-        return area_weights, distortion_weights
+        return geometry_weights, distortion_weights
 
 
 class AreaBasedBudgetingPolicy(BudgetingPolicy):
@@ -331,6 +346,88 @@ class AreaBasedBudgetingPolicy(BudgetingPolicy):
         super().__init__(mesh, **kwargs)
         # Use pre-computed face areas from the trimesh object
         self.weights = np.maximum(self.mesh.area_faces, EPS).astype(np.float32)
+
+
+class ScreenFootprintBudgetingPolicy(BudgetingPolicy):
+    """
+    Like AreaBasedBudgetingPolicy, but corrects for training-camera distance:
+    weight = world-space triangle area / mean squared distance to training-camera
+    centers, i.e. an approximation of on-screen (screen-space) footprint rather than
+    raw 3D area. A triangle far from every camera contributes less to what's actually
+    seen than the same-size triangle close up.
+
+    Camera centers only -- reads R/T straight off the raw CamInfo list (no Camera
+    object construction, no GT image loading) via the same closed form scene/cameras.py
+    uses (camera_center = -R @ T, since CameraInfo.R is already the CUDA/glm-transposed
+    convention -- see scene/cameras.py:60-63).
+
+    Caveat (explicitly not resolved by this class): assumes training-camera placement is
+    representative of real downstream viewing. Untested.
+    """
+    def __init__(self, mesh: trimesh.Trimesh, viewpoint_camera_infos=None, **kwargs):
+        super().__init__(mesh, **kwargs)
+        assert viewpoint_camera_infos is not None and len(viewpoint_camera_infos) != 0, \
+            "ScreenFootprintBudgetingPolicy::Missing CamInfos"
+
+        centers = np.stack([-cam.R @ cam.T for cam in viewpoint_camera_infos], axis=0)
+        tri_centroids = self.mesh.triangles_center
+        areas = self.mesh.area_faces
+
+        # mean_c(||t-c||^2) = ||t||^2 - 2 t.mean(c) + mean(||c||^2) -- exact, avoids
+        # materializing the (num_triangles, num_cams) dense distance matrix.
+        mean_c = centers.mean(axis=0)
+        mean_c2 = (centers ** 2).sum(axis=1).mean()
+        mean_d2 = (tri_centroids ** 2).sum(axis=1) - 2.0 * tri_centroids.dot(mean_c) + mean_c2
+        footprint = areas / np.maximum(mean_d2, EPS)
+        self.weights = np.maximum(footprint, EPS).astype(np.float32)
+
+
+class VertexColorDispersionBudgetingPolicy(BudgetingPolicy):
+    """
+    Mesh-only (no camera/render), reuses PlanarityBasedBudgetingPolicy's hop-neighborhood
+    idea but on the mesh's own baked vertex color instead of face normals: weight = L2
+    distance between a triangle's own (vertex-averaged) color and the mean color of its
+    hops-ring neighborhood. High value = local color/texture detail a flat per-triangle
+    splat-color init can't capture (same underlying issue as the known init-color bug,
+    used here as an allocation signal instead).
+
+    Not the same formula as planarity's MRL (mean resultant length) -- colors are points
+    in the RGB cube, not unit vectors on S^2, so this is neighborhood variance, not MRL.
+
+    Vectorized via sparse hop-reachability (scipy.sparse) rather than PlanarityBasedBudgeting
+    Policy's per-face Python BFS loop -- verified to reproduce the same "within <=hops BFS
+    steps" neighborhood definition, just fast enough to run on an 8.8M-face mesh (bicycle).
+    """
+    def __init__(self, mesh: trimesh.Trimesh, hops: int = 2, **kwargs):
+        super().__init__(mesh, **kwargs)
+        self.hops = int(max(0, hops))
+
+        if not hasattr(mesh.visual, "vertex_colors"):
+            print("[WARNING] VertexColorDispersionBudgetingPolicy: mesh has no vertex colors, "
+                  "falling back to uniform weights.")
+            return
+
+        import scipy.sparse as sp
+
+        vertex_colors = np.asarray(mesh.visual.vertex_colors, dtype=np.float32)[:, :3] / 255.0
+        face_colors = vertex_colors[mesh.faces].mean(axis=1)  # (F, 3)
+
+        fa = mesh.face_adjacency
+        n = mesh.faces.shape[0]
+        rows = np.concatenate([fa[:, 0], fa[:, 1]])
+        cols = np.concatenate([fa[:, 1], fa[:, 0]])
+        A = sp.csr_matrix((np.ones(len(rows), dtype=np.float32), (rows, cols)), shape=(n, n))
+
+        R = sp.identity(n, format="csr", dtype=np.float32)
+        for _ in range(self.hops):
+            R = R + R.dot(A)
+            R.data[:] = 1.0
+            R.eliminate_zeros()
+
+        count = np.asarray(R.sum(axis=1)).flatten()
+        neighbor_mean = R.dot(face_colors) / np.maximum(count, 1.0)[:, None]
+        dispersion = np.linalg.norm(face_colors - neighbor_mean, axis=1)
+        self.weights = np.maximum(dispersion, EPS).astype(np.float32)
 
 
 class UniformBudgetingPolicy(BudgetingPolicy):
