@@ -284,17 +284,17 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
         done
     done
 
-    # total_end=$(date +%s)
-    # wall_secs=$((total_end - total_start))
-    # echo "================================================================="
-    # echo "All pipelines completed."
-    # echo "Wall-clock total: $(fmt_time "$wall_secs") (${wall_secs}s)"
-    # echo "Sum of experiment durations: $(fmt_time "$total_exp_seconds") (${total_exp_seconds}s)"
-    # printf "TOTAL\t\t\t%d\t%d\t%d\t%d\t%d\tTOTAL_SUM\n" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$total_exp_seconds" >> "$TIMING_SUMMARY"
-    # echo "Failed experiments: ${failed_experiments}"
-    # echo "Timing summary saved to: ${TIMING_SUMMARY}"
-    # if [ $failed_experiments -gt 0 ]; then
-    #     echo "Failed experiments log: ${FAILED_LOG}"
-    # fi
-    # echo "================================================================="
+    total_end=$(date +%s)
+    wall_secs=$((total_end - total_start))
+    echo "================================================================="
+    echo "All pipelines completed."
+    echo "Wall-clock total: $(fmt_time "$wall_secs") (${wall_secs}s)"
+    echo "Sum of experiment durations: $(fmt_time "$total_exp_seconds") (${total_exp_seconds}s)"
+    printf "TOTAL\t\t\t%d\t%d\t%d\t%d\t%d\tTOTAL_SUM\n" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$total_exp_seconds" >> "$TIMING_SUMMARY"
+    echo "Failed experiments: ${failed_experiments}"
+    echo "Timing summary saved to: ${TIMING_SUMMARY}"
+    if [ $failed_experiments -gt 0 ]; then
+        echo "Failed experiments log: ${FAILED_LOG}"
+    fi
+    echo "================================================================="
 done

@@ -70,7 +70,6 @@ def get_budgeting_policy(name: str, mesh=None, **kwargs) -> BudgetingPolicy:
         "random": RandomUniformBudgetingPolicy, # turns out to be better than naive Uniform
         # "rand_norm": RandomNormalBudgetingPolicy,
         "area": AreaBasedBudgetingPolicy,
-        "screen_footprint": ScreenFootprintBudgetingPolicy,
         "vertex_color_disp2": partial(VertexColorDispersionBudgetingPolicy, hops=2),
 
         # try different #hops, then change this default one to the optimal candidate
@@ -346,40 +345,6 @@ class AreaBasedBudgetingPolicy(BudgetingPolicy):
         super().__init__(mesh, **kwargs)
         # Use pre-computed face areas from the trimesh object
         self.weights = np.maximum(self.mesh.area_faces, EPS).astype(np.float32)
-
-
-class ScreenFootprintBudgetingPolicy(BudgetingPolicy):
-    """
-    Like AreaBasedBudgetingPolicy, but corrects for training-camera distance:
-    weight = world-space triangle area / mean squared distance to training-camera
-    centers, i.e. an approximation of on-screen (screen-space) footprint rather than
-    raw 3D area. A triangle far from every camera contributes less to what's actually
-    seen than the same-size triangle close up.
-
-    Camera centers only -- reads R/T straight off the raw CamInfo list (no Camera
-    object construction, no GT image loading) via the same closed form scene/cameras.py
-    uses (camera_center = -R @ T, since CameraInfo.R is already the CUDA/glm-transposed
-    convention -- see scene/cameras.py:60-63).
-
-    Caveat (explicitly not resolved by this class): assumes training-camera placement is
-    representative of real downstream viewing. Untested.
-    """
-    def __init__(self, mesh: trimesh.Trimesh, viewpoint_camera_infos=None, **kwargs):
-        super().__init__(mesh, **kwargs)
-        assert viewpoint_camera_infos is not None and len(viewpoint_camera_infos) != 0, \
-            "ScreenFootprintBudgetingPolicy::Missing CamInfos"
-
-        centers = np.stack([-cam.R @ cam.T for cam in viewpoint_camera_infos], axis=0)
-        tri_centroids = self.mesh.triangles_center
-        areas = self.mesh.area_faces
-
-        # mean_c(||t-c||^2) = ||t||^2 - 2 t.mean(c) + mean(||c||^2) -- exact, avoids
-        # materializing the (num_triangles, num_cams) dense distance matrix.
-        mean_c = centers.mean(axis=0)
-        mean_c2 = (centers ** 2).sum(axis=1).mean()
-        mean_d2 = (tri_centroids ** 2).sum(axis=1) - 2.0 * tri_centroids.dot(mean_c) + mean_c2
-        footprint = areas / np.maximum(mean_d2, EPS)
-        self.weights = np.maximum(footprint, EPS).astype(np.float32)
 
 
 class VertexColorDispersionBudgetingPolicy(BudgetingPolicy):

@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
 EXP_NAME="policy_sweep_20260727"
-DEFAULT_POLICIES=(uniform area screen_footprint planarity2 distortion vertex_color_disp2 \
+DEFAULT_POLICIES=(uniform area planarity2 distortion vertex_color_disp2 \
     mixed_area mixed_area_v3g1 mixed_area_v1g3 mixed_colordisp mixed_colordisp_v3g1 mixed_colordisp_v1g3)
 # POLICIES_OVERRIDE (space-separated string) lets a launcher split the full list across
 # multiple GPUs for one scene (e.g. bicycle's 12 policies across 2 GPUs, 6 each).
