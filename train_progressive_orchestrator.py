@@ -67,6 +67,8 @@ def compute_schedule(schedule, total_splats, rounds, seed=0):
         cumulative_fraction = [round_index / rounds for round_index in range(rounds + 1)]
     elif schedule == "quadratic":
         cumulative_fraction = [(round_index / rounds) ** 2 for round_index in range(rounds + 1)]
+    elif schedule == "sqrt":
+        cumulative_fraction = [math.sqrt(round_index / rounds) for round_index in range(rounds + 1)]
     elif schedule == "exponential":
         growth_rate = 3.0
         cumulative_fraction = [
@@ -492,7 +494,7 @@ if __name__ == "__main__":
                               "derived from --schedule")
     parser.add_argument("--iters_per_round", type=int, required=True)
     parser.add_argument("--schedule", type=str, default="linear",
-                         choices=["linear", "quadratic", "exponential", "logarithmic", "random"],
+                         choices=["linear", "quadratic", "sqrt", "exponential", "logarithmic", "random"],
                          help="how --total_splats is split across rounds")
     parser.add_argument("--seed", type=int, default=0,
                          help="RNG seed for --schedule random")

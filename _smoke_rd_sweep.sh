@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
-EXP_NAME="rd_sweep_20260731"
+EXP_NAME="_smoke_rd"
 # distortion maps to the round-aware distortion_progressive alloc_policy for orchestrator
 # runs; every other policy has no progressive variant (known gap, todo.md) and is passed
 # through as-is -- output dirs still use the plain "distortion" name for consistency with
@@ -42,7 +42,7 @@ fi
 # moves as budget grows on that scene, so the special ladder buys nothing and costs a lot.
 # Its old scaled-ladder results stay on disk under the same EXP_NAME (different budget
 # values => different dir names, no collision) -- do not delete them.
-LADDER=(40000 80000 160000 320000 640000)
+LADDER=(2000)
 
 IMAGES=""
 case "$SCENE_ARG" in
@@ -61,8 +61,8 @@ DATASET_DIR="$DATASET_BASE_DIR/$DATA"
 MESH_FILE="$MESH_BASE_DIR/$MESHDIR/$MESHDIR.ply"
 MESH_IMG_DIR="$MESH_BASE_DIR/$MESHDIR"
 RAST=nvdiffrast
-ROUNDS=4
-ITERS_PER_ROUND=8000
+ROUNDS=2
+ITERS_PER_ROUND=20
 PY() { conda run -n lmg python "$@"; }
 
 run_one() {

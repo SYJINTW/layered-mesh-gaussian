@@ -86,7 +86,18 @@ case "$GROUP" in
         CONFIGS=("hotdog:random:1" "hotdog:random:2" "hotdog:random:3" "hotdog:random:4" "hotdog:random:5" \
                  "hotdog:linear:0" "hotdog:quadratic:0" \
                  "ship:linear:0" "ship:quadratic:0" "ship:random:42") ;;
-    *) echo "unknown group: $GROUP (expected bicycle|hotdog_ship)"; exit 1 ;;
+    # The three remaining growth-curve shapes (todo.md HIGHEST PRIORITY). Budgets are
+    # deliberately UNCHANGED from the groups above (hotdog/ship 32000, bicycle 320000) --
+    # the point is comparability against the existing linear/quadratic/random results, so
+    # bicycle keeps its 320k here even though the RD sweep moved bicycle to the small
+    # ladder. `sqrt` was added to compute_schedule() 2026-08-11; exponential/logarithmic
+    # already existed and had simply never been run.
+    curves_hotdog_ship)
+        CONFIGS=("hotdog:exponential:0" "hotdog:logarithmic:0" "hotdog:sqrt:0" \
+                 "ship:exponential:0" "ship:logarithmic:0" "ship:sqrt:0") ;;
+    curves_bicycle)
+        CONFIGS=("bicycle:exponential:0" "bicycle:logarithmic:0" "bicycle:sqrt:0") ;;
+    *) echo "unknown group: $GROUP (expected bicycle|hotdog_ship|curves_hotdog_ship|curves_bicycle)"; exit 1 ;;
 esac
 
 echo "=============== SCHEDULE ABLATION group=$GROUP on GPU $CUDA_VISIBLE_DEVICES ==============="
