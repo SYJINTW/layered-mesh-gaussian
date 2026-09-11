@@ -31,7 +31,8 @@ import json
 import time
 
 def create_scene_card(dataset: ModelParams, scene, gs_type: str, occlusion: bool, 
-                     mesh_type: str, iteration: int, render_time: float = None) -> dict:
+                     mesh_type: str, iteration: int, render_time: float = None,
+                     texture_obj_path: str = None) -> dict:
     """
     Create a scene card dictionary with rendering metadata.
     
@@ -43,6 +44,7 @@ def create_scene_card(dataset: ModelParams, scene, gs_type: str, occlusion: bool
         mesh_type: Type of mesh used ('sugar', 'colmap', etc.)
         iteration: Training iteration number
         render_time: Total rendering time in seconds (optional)
+        texture_obj_path: Path to the mesh, recorded and hashed into the card
     
     Returns:
         Dictionary containing scene metadata
@@ -99,7 +101,19 @@ def create_scene_card(dataset: ModelParams, scene, gs_type: str, occlusion: bool
     
     # Mesh type
     scene_card["mesh_type"] = mesh_type
-    
+
+    # Which mesh, exactly. A run directory records the mesh nowhere else, so
+    # without this there is no way to tell later whether a checkpoint was
+    # rendered against the mesh it was trained on.
+    scene_card["mesh_path"] = texture_obj_path
+    scene_card["mesh_sha256"] = None
+    if texture_obj_path and os.path.isfile(texture_obj_path):
+        try:
+            from lmg_format.codec import sha256_file
+            scene_card["mesh_sha256"] = sha256_file(texture_obj_path)
+        except Exception as e:
+            print(f"[WARNING] could not hash mesh {texture_obj_path}: {e}")
+
     # Trained iterations / epoch
     scene_card["trained_iteration"] = scene.loaded_iter if hasattr(scene, "loaded_iter") else iteration
     
@@ -311,7 +325,8 @@ def render_sets(gs_type: str, dataset : ModelParams, iteration : int,
     # Create and save scene card
     render_time = time.time() - render_timer_start
     scene_card = create_scene_card(dataset, scene, gs_type, occlusion, 
-                                   mesh_type, iteration, render_time)
+                                   mesh_type, iteration, render_time,
+                                   texture_obj_path=texture_obj_path)
     scene_card_path = os.path.join(dataset.model_path, "scene_card.json")
     save_scene_card(scene_card, scene_card_path)
 

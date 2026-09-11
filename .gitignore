@@ -29,3 +29,6 @@ exp_script_*/
 # 
 .github
 .claude
+# lmg_format / Rust crate
+rust/*/target/
+__pycache__/
