@@ -49,7 +49,6 @@ def main(argv=None):
     v.add_argument("full_dir")
     v.add_argument("--mesh", required=True)
     v.add_argument("--device", default=DEFAULT_DEVICE)
-    v.add_argument("--tol", type=float, default=1e-6)
     v.add_argument("--keep", default=None, help="keep intermediates in this dir")
 
     s = sub.add_parser("inspect", help="print a bundle's header")
@@ -67,15 +66,17 @@ def main(argv=None):
     else:
         tmp = a.keep or tempfile.mkdtemp(prefix="lmg_verify_")
         os.makedirs(tmp, exist_ok=True)
-        r = verify(a.full_dir, a.mesh, tmp, device=a.device, tol=a.tol)
+        r = verify(a.full_dir, a.mesh, tmp, device=a.device)
         print(a.full_dir)
         print("  variant=%s barycentric=%s scale=%s N=%s F=%s" % (
             r["meta"]["model_variant"], r["meta"]["barycentric_mode"],
             r["meta"]["scale_mode"], r["meta"]["num_splats"], r["meta"]["num_faces"]))
         for k, ok in sorted(r["exact"].items()):
             print("  exact   %-24s %s" % (k, "OK" if ok else "MISMATCH"))
-        for k, dv in sorted(r["derived"].items()):
-            print("  derived %-24s max|diff| = %.3g" % (k, dv))
+        for k, d in sorted(r["derived"].items()):
+            print("  derived %-14s max=%.3g (tol %.0e)  median=%.3g (tol %.0e)  %s"
+                  % (k, d["max"], d["tol_max"], d["median"], d["tol_median"],
+                     "OK" if d["ok"] else "FAIL"))
         sz = r["sizes"]
         print("  size    full %.2f MB -> lean %.2f MB  (%.2fx)" % (
             sz["full_bytes"] / 1e6, sz["lean_bytes"] / 1e6, sz["ratio"]))

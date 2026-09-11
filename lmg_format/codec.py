@@ -52,8 +52,12 @@ def _np(x):
     return x.detach().cpu().numpy() if torch.is_tensor(x) else np.asarray(x)
 
 
-def _read_appearance(ply_path, sh_degree=3):
+def _read_appearance(ply_path):
     """Pull f_dc/f_rest/opacity out of a Full point_cloud.ply, in PLY field order.
+
+    sh_degree is read off the file rather than assumed: --sh_degree is a real
+    exposed flag, and trusting a default here would silently truncate a
+    degree-4 model's SH to degree 3 while stamping "3" in the metadata.
 
     Keeping the flat PLY ordering (channel-major for f_rest) means inflate can
     write the bytes straight back out without a second transpose convention.
@@ -61,22 +65,33 @@ def _read_appearance(ply_path, sh_degree=3):
     ply = PlyData.read(ply_path)
     v = ply.elements[0]
     n = v.count
-    n_rest = 3 * ((sh_degree + 1) ** 2 - 1)
+
+    n_rest = sum(1 for p in v.properties if p.name.startswith("f_rest_"))
+    # n_rest == 3 * ((d+1)**2 - 1)
+    sh_degree = int(round(((n_rest / 3) + 1) ** 0.5)) - 1
+    if 3 * ((sh_degree + 1) ** 2 - 1) != n_rest:
+        raise NotDeduplicable(
+            "ply has %d f_rest columns, which is not 3*((d+1)^2-1) for any d" % n_rest)
 
     f_dc = np.stack([v["f_dc_%d" % i] for i in range(3)], axis=1)
     f_rest = np.stack([v["f_rest_%d" % i] for i in range(n_rest)], axis=1)
     opacity = np.asarray(v["opacity"]).reshape(n, 1)
     return (f_dc.astype(np.float32),
             f_rest.astype(np.float32),
-            opacity.astype(np.float32))
+            opacity.astype(np.float32),
+            sh_degree)
 
 
 def _sparsify(budgets):
     """Dense [F] budget array -> (face_id, count) pairs for occupied faces."""
     face_id = np.flatnonzero(budgets).astype(np.uint32)
     counts = budgets[face_id]
-    dtype = np.uint8 if counts.max(initial=0) <= 255 else np.uint16
-    return face_id, counts.astype(dtype)
+    top = int(counts.max(initial=0))
+    if top > 65535:
+        raise NotDeduplicable(
+            "a face carries %d splats, which does not fit the u16 budget_count "
+            "column; widen the dtype before encoding this checkpoint" % top)
+    return face_id, counts.astype(np.uint8 if top <= 255 else np.uint16)
 
 
 def _densify(face_id, counts, num_faces):
@@ -118,6 +133,11 @@ def _write_normalized_mesh(mesh_path, dst):
     ~4e-2. Storing the processed mesh means a decoder that reads the PLY
     plainly -- the Rust one does -- derives exactly what Python derives,
     instead of being held to a tolerance that degenerate faces cannot meet.
+
+    Vertex colours ARE the mesh texture here: every mesh in the library is
+    vertex-coloured with no UVs, and both rasterizer backends read
+    `visual.vertex_colors`. Dropping them leaves a mesh that still anchors
+    splats correctly but renders flat grey, so they are carried through.
     """
     from renderer.mesh_loader import mesh_loader
     from plyfile import PlyElement
@@ -125,15 +145,25 @@ def _write_normalized_mesh(mesh_path, dst):
     mesh = mesh_loader.load_transformed_mesh(mesh_path)
     verts = np.asarray(mesh.vertices, dtype=np.float32)
     faces = np.asarray(mesh.faces, dtype=np.int32)
-    v = np.empty(verts.shape[0], dtype=[("x", "f4"), ("y", "f4"), ("z", "f4")])
+
+    fields = [("x", "f4"), ("y", "f4"), ("z", "f4")]
+    colors = None
+    if getattr(mesh.visual, "kind", None) == "vertex":
+        colors = np.asarray(mesh.visual.vertex_colors, dtype=np.uint8)
+        fields += [(c, "u1") for c in ("red", "green", "blue", "alpha")]
+
+    v = np.empty(verts.shape[0], dtype=fields)
     v["x"], v["y"], v["z"] = verts[:, 0], verts[:, 1], verts[:, 2]
+    if colors is not None:
+        for i, c in enumerate(("red", "green", "blue", "alpha")):
+            v[c] = colors[:, i]
     f = np.empty(faces.shape[0], dtype=[("vertex_indices", "i4", (3,))])
     f["vertex_indices"] = faces
     PlyData([PlyElement.describe(v, "vertex"),
              PlyElement.describe(f, "face")], text=False).write(dst)
 
 
-def deflate(full_dir, out_bundle, mesh_path, link_mesh=False, sh_degree=3):
+def deflate(full_dir, out_bundle, mesh_path, link_mesh=False):
     """Full checkpoint dir -> Lean bundle. Returns the metadata dict."""
     pt_path = os.path.join(full_dir, "model_params.pt")
     ply_path = os.path.join(full_dir, "point_cloud.ply")
@@ -163,8 +193,8 @@ def deflate(full_dir, out_bundle, mesh_path, link_mesh=False, sh_degree=3):
         raise NotDeduplicable("alpha_indices is not concat(arange(n) per face)")
 
     tensors = {}
-    tensors["f_dc"], tensors["f_rest"], tensors["opacity"] = _read_appearance(
-        ply_path, sh_degree)
+    (tensors["f_dc"], tensors["f_rest"],
+     tensors["opacity"], sh_degree) = _read_appearance(ply_path)
     if tensors["f_dc"].shape[0] != n:
         raise NotDeduplicable(
             "ply has %d splats, model_params.pt has %d"
@@ -327,11 +357,11 @@ def inflate(bundle, out_dir, mesh_path=None, device="cpu", check_mesh=True):
 #                                    verify                                    #
 # --------------------------------------------------------------------------- #
 
-def verify(full_dir, mesh_path, workdir, device="cpu", tol=1e-6, sh_degree=3):
+def verify(full_dir, mesh_path, workdir, device="cpu"):
     """deflate -> inflate -> compare against the original Full checkpoint."""
     bundle = os.path.join(workdir, "bundle.lmg")
     back = os.path.join(workdir, "roundtrip")
-    meta = deflate(full_dir, bundle, mesh_path, link_mesh=True, sh_degree=sh_degree)
+    meta = deflate(full_dir, bundle, mesh_path, link_mesh=True)
     inflate(bundle, back, device=device)
 
     orig = torch.load(os.path.join(full_dir, "model_params.pt"), map_location="cpu")
@@ -344,20 +374,36 @@ def verify(full_dir, mesh_path, workdir, device="cpu", tol=1e-6, sh_degree=3):
             continue
         report["exact"][key] = bool(np.array_equal(_np(orig[key]), _np(new[key])))
 
-    a = _read_appearance(os.path.join(full_dir, "point_cloud.ply"), sh_degree)
-    b = _read_appearance(os.path.join(back, "point_cloud.ply"), sh_degree)
+    a = _read_appearance(os.path.join(full_dir, "point_cloud.ply"))[:3]
+    b = _read_appearance(os.path.join(back, "point_cloud.ply"))[:3]
     for name, x, y in zip(("f_dc", "f_rest", "opacity"), a, b):
         report["exact"][name] = bool(np.array_equal(x, y))
 
-    # Derived fields: reproduced by formula, compared within tolerance.
+    # Derived fields are reproduced by formula, never byte-compared: float
+    # accumulation order is not portable, and on CPU the same correct round
+    # trip lands ~3e-4 away in log space. Tolerances mirror conformance.rs --
+    # `scale` is stored as log(s + 1e-8) so d(log)/ds = 1/s blows a 1-ULP
+    # difference up to ~1e-4 on thin triangles (compare the actual scale
+    # instead), and `rot` comes from a Gram-Schmidt frame that is
+    # ill-conditioned on near-degenerate faces (loose max, tight median).
     pa, pb = (PlyData.read(os.path.join(d, "point_cloud.ply")).elements[0]
               for d in (full_dir, back))
-    for group in (("x", "y", "z"),
-                  ("scale_0", "scale_1", "scale_2"),
-                  ("rot_0", "rot_1", "rot_2", "rot_3")):
-        d = max(float(np.abs(np.asarray(pa[f_]) - np.asarray(pb[f_])).max())
-                for f_ in group)
-        report["derived"][group[0].split("_")[0]] = d
+    for name, group, linear, tol_max, tol_med in (
+            ("x", ("x", "y", "z"), False, 1e-6, 1e-6),
+            ("scale", ("scale_0", "scale_1", "scale_2"), True, 1e-6, 1e-6),
+            ("rot", ("rot_0", "rot_1", "rot_2", "rot_3"), False, 1e-3, 1e-5)):
+        cols = []
+        for f_ in group:
+            x, y = np.asarray(pa[f_]), np.asarray(pb[f_])
+            if linear:
+                x, y = np.exp(x), np.exp(y)
+            cols.append(np.abs(x - y))
+        per_row = np.max(np.stack(cols, axis=1), axis=1)
+        report["derived"][name] = {
+            "max": float(per_row.max()), "median": float(np.median(per_row)),
+            "tol_max": tol_max, "tol_median": tol_med,
+            "ok": bool(per_row.max() <= tol_max and np.median(per_row) <= tol_med),
+        }
 
     full_bytes = sum(os.path.getsize(os.path.join(full_dir, f))
                      for f in ("point_cloud.ply", "model_params.pt"))
@@ -368,5 +414,5 @@ def verify(full_dir, mesh_path, workdir, device="cpu", tol=1e-6, sh_degree=3):
         "ratio": full_bytes / lean_bytes,
     }
     report["ok"] = (all(report["exact"].values())
-                    and all(v <= tol for v in report["derived"].values()))
+                    and all(d["ok"] for d in report["derived"].values()))
     return report

@@ -100,11 +100,14 @@ pub fn read_mesh(path: &Path) -> Result<Mesh, String> {
     for el in &elements {
         let is_vertex = el.name == "vertex";
         let is_face = el.name == "face";
+        // Reserve against what the file can actually contain, not against a
+        // count the header claims -- a corrupt count asked for tens of GB.
+        let cap = el.count.min(body.len().saturating_sub(off) / 4 + 1);
         if is_vertex {
-            vertices.reserve(el.count);
+            vertices.reserve(cap);
         }
         if is_face {
-            faces.reserve(el.count);
+            faces.reserve(cap);
         }
 
         for _ in 0..el.count {
@@ -113,6 +116,9 @@ pub fn read_mesh(path: &Path) -> Result<Mesh, String> {
                 match prop {
                     Prop::Scalar { name, ty } => {
                         let sz = scalar_size(ty).ok_or_else(|| format!("unknown type {}", ty))?;
+                        if off + sz > body.len() {
+                            return Err("truncated PLY body".into());
+                        }
                         if is_vertex {
                             let slot = match name.as_str() {
                                 "x" => Some(0),
@@ -136,9 +142,15 @@ pub fn read_mesh(path: &Path) -> Result<Mesh, String> {
                     }
                     Prop::List { count_ty, item_ty } => {
                         let csz = scalar_size(count_ty).ok_or("bad list count type")?;
+                        if off + csz > body.len() {
+                            return Err("truncated PLY body".into());
+                        }
                         let n = read_u32(body, off, count_ty) as usize;
                         off += csz;
                         let isz = scalar_size(item_ty).ok_or("bad list item type")?;
+                        if off + isz * n > body.len() {
+                            return Err("truncated PLY body".into());
+                        }
                         if is_face {
                             if n != 3 {
                                 return Err("mesh must be triangulated".into());
@@ -157,6 +169,15 @@ pub fn read_mesh(path: &Path) -> Result<Mesh, String> {
                 vertices.push(xyz);
             }
         }
+    }
+    // Face indices are used to slice `vertices` directly, so an out-of-range
+    // one is a panic rather than an error unless it is caught here.
+    let nv = vertices.len() as u32;
+    if let Some(bad) = faces.iter().flatten().find(|i| **i >= nv) {
+        return Err(format!(
+            "face references vertex {} but the mesh has {} vertices",
+            bad, nv
+        ));
     }
     Ok(Mesh { vertices, faces })
 }

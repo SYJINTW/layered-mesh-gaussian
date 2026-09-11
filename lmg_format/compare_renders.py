@@ -21,7 +21,6 @@ from argparse import Namespace
 import numpy as np
 import torch
 import torchvision
-from PIL import Image
 
 from .codec import deflate, inflate, load_lean
 
@@ -45,7 +44,6 @@ def _run_paths(scene, mesh_root):
         run_root=base,
         full_dir=os.path.join(base, "point_cloud", "iteration_%d" % CKPT_ITER),
         mesh=os.path.join(mesh_root, mesh_dir, "%s.ply" % mesh_dir),
-        mesh_img_dir=os.path.join(mesh_root, mesh_dir),
         images=images,
     )
 
@@ -60,29 +58,16 @@ def _load_cfg(run_root, images):
     return args
 
 
-def _mesh_background(mesh_img_dir, view):
-    """The pre-rendered mesh layer the pipeline uses, so row 1 matches the real run."""
-    from pathlib import Path
-    import torchvision.transforms as T
-
-    bg = bg_depth = None
-    tex = Path(mesh_img_dir) / "test_mesh_texture" / ("%s.png" % view.image_name)
-    dep = Path(mesh_img_dir) / "test_mesh_depth" / ("%s.pt" % view.image_name)
-    if tex.exists():
-        img = Image.open(tex).convert("RGB").resize(
-            (view.image_width, view.image_height), Image.BILINEAR)
-        bg = T.ToTensor()(img).to(torch.float32).cuda()
-    if dep.exists():
-        bg_depth = torch.load(dep).unsqueeze(0).to("cuda")
-    return bg, bg_depth
-
-
 def _render_pair(render_fn, view, gaussians, pipe, background,
-                 textured_mesh, mesh_img_dir, rasterizer):
-    """(mesh + GS, GS only) for one view."""
-    bg, bg_depth = _mesh_background(mesh_img_dir, view)
+                 textured_mesh, rasterizer):
+    """(mesh + GS, GS only) for one view.
+
+    The mesh layer is rasterized live rather than read from the precaptured
+    cache. The cache would satisfy render()'s bg_color+bg_depth branch and skip
+    mesh rasterization altogether, leaving the bundle's own mesh untested.
+    """
     composite = render_fn(view, gaussians, pipe,
-                          bg_color=bg, bg_depth=bg_depth,
+                          bg_color=None, bg_depth=None,
                           textured_mesh=textured_mesh,
                           mesh_background_color=background,
                           mesh_rasterizer_type=rasterizer)["render"]
@@ -138,11 +123,17 @@ def run_scene(scene, mesh_root, out_root, n_views, workdir):
 
     bundle = os.path.join(workdir, scene + ".lmg")
     back = os.path.join(workdir, scene + "_roundtrip")
-    deflate(p.full_dir, bundle, p.mesh, link_mesh=True)
+    deflate(p.full_dir, bundle, p.mesh)
     inflate(bundle, back, device="cuda")
 
     with torch.no_grad():
         textured_mesh = mesh_loader.load_textured_mesh(args, p.mesh, rasterizer)
+        # Rows 2 and 3 composite against the mesh that ships INSIDE the bundle,
+        # not the source mesh. Using the source mesh for every row leaves the
+        # mesh layer untested -- that is how a bundle that had silently dropped
+        # its vertex colours still scored a perfect zero difference.
+        bundle_mesh = mesh_loader.load_textured_mesh(
+            args, os.path.join(bundle, "mesh.ply"), rasterizer)
         # One Scene for cameras; row 1's gaussians come loaded with it.
         gaussians = gaussianModel[args.gs_type](args.sh_degree)
         scene_obj = SceneSimple(args=args, gaussians=gaussians,
@@ -170,9 +161,11 @@ def run_scene(scene, mesh_root, out_root, n_views, workdir):
         for k, vi in enumerate(picks):
             view = views[int(vi)]
             grid, diffs = [], []
-            for model in (gaussians, lean, rt):
+            for model, mesh_for_row in ((gaussians, textured_mesh),
+                                        (lean, bundle_mesh),
+                                        (rt, bundle_mesh)):
                 grid.append(list(_render_pair(render, view, model, pipe, background,
-                                              textured_mesh, p.mesh_img_dir, rasterizer)))
+                                              mesh_for_row, rasterizer)))
             for row in grid:
                 diffs.append([float((row[c] - grid[0][c]).abs().max()) for c in range(2)])
 
@@ -210,7 +203,7 @@ def main(argv=None):
             print("=== %s ===" % scene)
             worst[scene] = run_scene(scene, a.mesh_root, a.out, a.views, workdir)
     print("\nworst max|diff| per scene:", {k: "%.3g" % v for k, v in worst.items()})
-    return 0 if all(v == 0 for v in worst.values()) else 0
+    return 0 if all(v == 0 for v in worst.values()) else 1
 
 
 if __name__ == "__main__":

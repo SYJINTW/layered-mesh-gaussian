@@ -109,7 +109,7 @@ def main(out_root):
         torch.save(torch.from_numpy(pool), os.path.join(case, "static_alpha.pt"))
 
         bundle = os.path.join(case, "bundle.lmg")
-        meta = deflate(full, bundle, mesh_path, sh_degree=SH_DEGREE)
+        meta = deflate(full, bundle, mesh_path)
         _expected(full, os.path.join(case, "expected.safetensors"))
         os.remove(mesh_path)
         print("%-8s N=%d barycentric=%s scale=%s -> %s"
@@ -126,7 +126,7 @@ def from_full(full_dir, mesh_path, out_case, sh_degree=SH_DEGREE):
     import shutil
     os.makedirs(out_case, exist_ok=True)
     bundle = os.path.join(out_case, "bundle.lmg")
-    meta = deflate(full_dir, bundle, mesh_path, sh_degree=sh_degree)
+    meta = deflate(full_dir, bundle, mesh_path)
     _expected(full_dir, os.path.join(out_case, "expected.safetensors"))
     shutil.copy2(os.path.join(full_dir, "model_params.pt"),
                  os.path.join(out_case, "source_model_params.pt"))

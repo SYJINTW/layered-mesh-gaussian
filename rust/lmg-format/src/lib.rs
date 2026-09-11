@@ -249,15 +249,28 @@ pub fn write_params(bundle: &Bundle, out: &Path) -> Result<(), String> {
     let md = bundle.metadata.clone();
 
     let n = bundle.meta.num_splats;
+    // Pick the count width from the data, exactly as the Python encoder does.
+    // Forcing u8 here silently wrapped any face carrying >255 splats: a budget
+    // of 300 came back as 44.
+    let top = bundle.budgets.iter().copied().max().unwrap_or(0);
+    if top > u16::MAX as u32 {
+        return Err(format!("a face carries {} splats, too wide for budget_count", top));
+    }
+    let narrow = top <= u8::MAX as u32;
     let mut face_id: Vec<u8> = Vec::new();
     let mut count: Vec<u8> = Vec::new();
+    let mut k = 0usize;
     for (f, c) in bundle.budgets.iter().enumerate() {
         if *c != 0 {
             face_id.extend_from_slice(&(f as u32).to_le_bytes());
-            count.push(*c as u8);
+            if narrow {
+                count.push(*c as u8);
+            } else {
+                count.extend_from_slice(&(*c as u16).to_le_bytes());
+            }
+            k += 1;
         }
     }
-    let k = count.len();
 
     let bytes = |v: &[f32]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
     let f_dc = bytes(&bundle.f_dc);
@@ -270,7 +283,7 @@ pub fn write_params(bundle: &Bundle, out: &Path) -> Result<(), String> {
         ("f_rest".into(), TensorView::new(Dtype::F32, vec![n, n_rest], &f_rest).map_err(|e| e.to_string())?),
         ("opacity".into(), TensorView::new(Dtype::F32, vec![n, 1], &opacity).map_err(|e| e.to_string())?),
         ("budget_face_id".into(), TensorView::new(Dtype::U32, vec![k], &face_id).map_err(|e| e.to_string())?),
-        ("budget_count".into(), TensorView::new(Dtype::U8, vec![k], &count).map_err(|e| e.to_string())?),
+        ("budget_count".into(), TensorView::new(if narrow { Dtype::U8 } else { Dtype::U16 }, vec![k], &count).map_err(|e| e.to_string())?),
     ];
 
     // Owned buffers must outlive the views, so build them before the vec grows.

@@ -189,3 +189,36 @@ fn real_checkpoint_matches_python() {
     let d = bundle.derive().expect("derive");
     compare("real", &d, &dir.join("expected.safetensors"), true);
 }
+
+/// Malformed meshes must come back as errors, not panics -- the README says so.
+#[test]
+fn malformed_ply_errors_instead_of_panicking() {
+    let good = std::fs::read(vectors_dir().join("binding/bundle.lmg/mesh.ply")).unwrap();
+    let dir = std::env::temp_dir().join("lmg_malformed");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Body cut short mid-element.
+    let cut = dir.join("truncated.ply");
+    std::fs::write(&cut, &good[..good.len() - 40]).unwrap();
+    assert!(lmg_format::ply::read_mesh(&cut).is_err(), "truncated body");
+
+    // A face index past the end of the vertex list.
+    let mut oob = good.clone();
+    let hdr = b"end_header\n";
+    let start = oob.windows(hdr.len()).position(|w| w == hdr).unwrap() + hdr.len();
+    let last = oob.len() - 4;
+    oob[last..].copy_from_slice(&u32::MAX.to_le_bytes());
+    let oob_path = dir.join("oob.ply");
+    std::fs::write(&oob_path, &oob).unwrap();
+    assert!(start < oob.len());
+    assert!(lmg_format::ply::read_mesh(&oob_path).is_err(), "out-of-range face index");
+
+    // A vertex count the file cannot possibly contain.
+    let text = String::from_utf8_lossy(&good[..start]).to_string();
+    let huge = text.replacen("element vertex 6", "element vertex 999999999", 1);
+    let mut f = huge.into_bytes();
+    f.extend_from_slice(&good[start..]);
+    let huge_path = dir.join("huge.ply");
+    std::fs::write(&huge_path, &f).unwrap();
+    assert!(lmg_format::ply::read_mesh(&huge_path).is_err(), "absurd element count");
+}
