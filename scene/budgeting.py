@@ -225,6 +225,13 @@ class MixedBudgetingPolicy(BudgetingPolicy):
                  dataset_path: str = None,
                  mesh_type: str = None,
                  geometry_policy_name: str = "area",
+                 gaussians=None,
+                 pipe=None,
+                 viewpoint_cameras=None,
+                 mesh_for_render: trimesh.Trimesh = None,
+                 mesh_rasterizer_type: str = "nvdiffrast",
+                 mesh_background_color: tuple = (1.0, 1.0, 1.0),
+                 debugging: bool = True,
                  **kwargs):
 
         super().__init__(mesh, **kwargs)
@@ -241,6 +248,17 @@ class MixedBudgetingPolicy(BudgetingPolicy):
         self.dataset_path = dataset_path
         self.mesh_type = mesh_type
         self.geometry_policy_name = geometry_policy_name
+        # Progressive context (passed through by my_get_num_splats_per_triangle every round):
+        # when present, the distortion component is recomputed fresh against the CURRENT
+        # frozen Gaussians via ProgressiveDistortionMapBudgetingPolicy instead of read from
+        # the static, round-1-only distortion/weights.npy disk cache -- see _load_weights.
+        self.gaussians = gaussians
+        self.pipe = pipe
+        self.viewpoint_cameras = viewpoint_cameras
+        self.mesh_for_render = mesh_for_render
+        self.mesh_rasterizer_type = mesh_rasterizer_type
+        self.mesh_background_color = mesh_background_color
+        self.debugging = debugging
 
         # Load weights (importance score of each triangle) from files
         geometry_weights, distortion_weights = self._load_weights()
@@ -279,10 +297,19 @@ class MixedBudgetingPolicy(BudgetingPolicy):
     
     def _load_weights(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Load pre-calculated weights from policy directory.
-        
+        Load geometry-cue weights from the static policy-cache file (round-invariant,
+        purely mesh-based -- correct to cache/reuse). Distortion weights: recomputed
+        FRESH each call via ProgressiveDistortionMapBudgetingPolicy when viewpoint_cameras
+        (and, from round >=2, gaussians) are available -- i.e. whenever this policy is
+        constructed from the progressive orchestrator's per-round path
+        (my_get_num_splats_per_triangle passes gaussians/pipe/viewpoint_cameras through
+        every round). Falls back to the static distortion/weights.npy disk cache only when
+        no viewpoint_cameras were provided (the legacy single-round dataset_readers path,
+        which never passes them) -- that fallback is the original, still-correct behavior
+        for a genuinely single-round context.
+
         Returns:
-            tuple: (area_weights, distortion_weights) or (None, None) if loading fails
+            tuple: (geometry_weights, distortion_weights) or (None, None) if loading fails
         """
         # Construct paths based on number of triangles
         num_tri = self.num_triangles
@@ -291,11 +318,9 @@ class MixedBudgetingPolicy(BudgetingPolicy):
         policy_base = os.path.join(self.dataset_path, "policy", f"mesh_{mt}", f"tri_{num_tri}")
 
         geometry_path = os.path.join(policy_base, self.geometry_policy_name, "weights.npy")
-        distortion_path = os.path.join(policy_base, "distortion", "weights.npy")
 
         print(f"[INFO] MixedBudgetingPolicy::load() Loading weights for {num_tri} triangles")
         print(f"[INFO]   {self.geometry_policy_name} weights from: {geometry_path}")
-        print(f"[INFO]   Distortion weights from: {distortion_path}")
 
         # Load geometry-cue weights
         geometry_weights = None
@@ -315,24 +340,45 @@ class MixedBudgetingPolicy(BudgetingPolicy):
         else:
             print(f"[ERROR] {self.geometry_policy_name} weights file not found: {geometry_path}")
 
-        # Load distortion weights
+        # Distortion weights
         distortion_weights = None
-        if os.path.exists(distortion_path):
-            try:
-                distortion_weights = np.load(distortion_path).astype(np.float32)
-                if len(distortion_weights) != num_tri:
-                    print(f"[ERROR] Distortion weights length mismatch: "
-                          f"expected {num_tri}, got {len(distortion_weights)}")
-                    distortion_weights = None
-                else:
-                    print(f"[INFO] Loaded distortion weights: shape={distortion_weights.shape}, "
-                          f"range=[{distortion_weights.min():.4f}, {distortion_weights.max():.4f}]")
-            except Exception as e:
-                print(f"[ERROR] Failed to load distortion weights: {e}")
-                distortion_weights = None
+        if self.viewpoint_cameras is not None:
+            print(f"[INFO] MixedBudgetingPolicy: computing fresh distortion weights "
+                  f"(gaussians={'present -> round-aware residual' if self.gaussians is not None else 'None -> round 1'})")
+            distortion_policy = ProgressiveDistortionMapBudgetingPolicy(
+                self.mesh,
+                mesh_for_render=self.mesh_for_render,
+                gaussians=self.gaussians,
+                pipe=self.pipe,
+                viewpoint_cameras=self.viewpoint_cameras,
+                dataset_path=self.dataset_path,
+                debugging=self.debugging,
+                mesh_rasterizer_type=self.mesh_rasterizer_type,
+                mesh_background_color=self.mesh_background_color,
+            )
+            distortion_weights = distortion_policy.weights
+            print(f"[INFO] Computed distortion weights: shape={distortion_weights.shape}, "
+                  f"range=[{distortion_weights.min():.4f}, {distortion_weights.max():.4f}]")
         else:
-            print(f"[ERROR] Distortion weights file not found: {distortion_path}")
-        
+            distortion_path = os.path.join(policy_base, "distortion", "weights.npy")
+            print(f"[INFO]   No viewpoint_cameras provided (legacy single-round path) -- "
+                  f"falling back to static distortion weights from: {distortion_path}")
+            if os.path.exists(distortion_path):
+                try:
+                    distortion_weights = np.load(distortion_path).astype(np.float32)
+                    if len(distortion_weights) != num_tri:
+                        print(f"[ERROR] Distortion weights length mismatch: "
+                              f"expected {num_tri}, got {len(distortion_weights)}")
+                        distortion_weights = None
+                    else:
+                        print(f"[INFO] Loaded distortion weights: shape={distortion_weights.shape}, "
+                              f"range=[{distortion_weights.min():.4f}, {distortion_weights.max():.4f}]")
+                except Exception as e:
+                    print(f"[ERROR] Failed to load distortion weights: {e}")
+                    distortion_weights = None
+            else:
+                print(f"[ERROR] Distortion weights file not found: {distortion_path}")
+
         return geometry_weights, distortion_weights
 
 
