@@ -12,7 +12,7 @@
 #
 
 from arguments import OptimizationParams
-from arguments_games import (
+from arguments.games import (
     OptimizationParamsMesh,
     OptimizationParamsMeshHover,
     OptimizationParamsFlame,

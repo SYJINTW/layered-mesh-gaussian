@@ -29,8 +29,8 @@ POLICIES=("distortion")
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
 MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 

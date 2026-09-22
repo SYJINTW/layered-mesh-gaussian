@@ -1,6 +1,6 @@
 """Post-hoc per-stage timing from a pipeline log's [dd/mm HH:MM:SS] timestamps.
 
-Usage: python parse_timing.py <log_file> [<log_file> ...]
+Usage: python tools/parse_timing.py <log_file> [<log_file> ...]
 
 Heuristic: maps the first timestamp at/after each stage's start-marker to that stage,
 then stage_secs = next_marker_time - this_marker_time. Approximate (depends on log

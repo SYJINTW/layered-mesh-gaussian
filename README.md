@@ -30,7 +30,7 @@ See [DATASET.md](doc/DATASET.md) for instructions dataset.
 
 ### First-Time Setup: Machine-Specific Paths
 
-`exp_sample.sh` and `exp_progressive_lmg.sh` source an untracked `env.local.sh` for dataset/mesh paths — copy the example and edit it to your machine before running either script:
+`experiments/exp_sample.sh` and `experiments/exp_progressive_lmg.sh` source an untracked `env.local.sh` for dataset/mesh paths — copy the example and edit it to your machine before running either script:
 
 ```bash
 cp env.local.sh.example env.local.sh
@@ -55,10 +55,10 @@ Also edit these at the top of whichever script you run:
 To run the complete pipeline (Warmup → Training → Rendering → Metrics) with the default scene, policy, and budget, run the following command:
 
 ```bash
-bash exp_sample.sh
+bash experiments/exp_sample.sh
 ```
 
-> **Note:** You can configure the specific experiment settings (Scene, Policy, Budget) by editing the variables defined at the top of `exp_sample.sh`.
+> **Note:** You can configure the specific experiment settings (Scene, Policy, Budget) by editing the variables defined at the top of `experiments/exp_sample.sh`.
 
 ### LMG++: Progressive Multi-Round Training
 
@@ -78,7 +78,7 @@ conda run -n lmg python train_progressive_orchestrator.py --eval \
 - `--gs_type lmg_hover` selects the MaGS-style hover-offset variant (`LMGModelHover`, extends `LMGModel`).
 - `--schedule` controls how `--total_splats` is split across rounds: `linear` (default), `quadratic`/`exponential` (back-loaded), `logarithmic` (front-loaded), `random` (needs `--seed`).
 - `--alloc_policy distortion_progressive` is the distortion policy adapted for progressive multi-round allocation.
-- `exp_progressive_lmg.sh` is the legacy bash-loop driver (4 cold process spawns per round); the orchestrator is the current entry point for new runs. It also sources `env.local.sh` — see "First-Time Setup" above — and has its own `CUDA_VISIBLE_DEVICES`/`EXP_NAME`/`SCENE_NAME_LIST` to edit at the top.
+- `experiments/exp_progressive_lmg.sh` is the legacy bash-loop driver (4 cold process spawns per round); the orchestrator is the current entry point for new runs. It also sources `env.local.sh` — see "First-Time Setup" above — and has its own `CUDA_VISIBLE_DEVICES`/`EXP_NAME`/`SCENE_NAME_LIST` to edit at the top.
 
 ### Output Structure
 
@@ -94,7 +94,7 @@ The trained model files are saved as `.ply` files.
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/point_cloud/iteration_{ITER}/point_cloud.ply
 ```
 
-- **Example (`exp_sample.sh`):**
+- **Example (`experiments/exp_sample.sh`):**
 
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/point_cloud/iteration_15000/point_cloud.ply
@@ -110,7 +110,7 @@ The rendered images from the LMG model for specific iterations.
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/test/ours_{ITER}/renders_gs_mesh
 ```
 
-- **Example (`exp_sample.sh`):**
+- **Example (`experiments/exp_sample.sh`):**
 
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/test/ours_7000/renders_gs_mesh
@@ -128,7 +128,7 @@ Visual quality metrics are saved as JSON files containing per-view and aggregate
 ./output/{EXP_NAME}/{SCENE_NAME}/{CONFIG}/results_gs_mesh.json
 ```
 
-- **Example (`exp_sample.sh`):**
+- **Example (`experiments/exp_sample.sh`):**
 
 ```text
 ./output/sample_exp/hotdog/distortion_40000_occlusion/per_view_gs_mesh.json
@@ -145,7 +145,7 @@ Execution logs for the pipeline are stored in the separate log directory.
 ./log/{EXP_NAME}/{SCENE_NAME}/log_pipeline_{CONFIG}.log
 ```
 
-- **Example (`exp_sample.sh`):**
+- **Example (`experiments/exp_sample.sh`):**
 
 ```text
 ./log/sample_exp/hotdog/log_pipeline_distortion_40000_occlusion.log
@@ -360,7 +360,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py --eval \
 ```
 
 ```bash
-python render_gs.py -m output/gs_only --gs_type gs --skip_train
+python -m legacy.render_gs -m output/gs_only --gs_type gs --skip_train
 python metrics.py -m output/gs_only --gs_type gs
 ```
 

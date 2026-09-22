@@ -5,13 +5,13 @@
 # count. If PSNR recovers toward single_rand's level, that's direct evidence the
 # frozen state was a correctable local optimum, not a genuine ceiling.
 #
-#   bash exp_unfreeze_recovery.sh <gpu>
+#   bash experiments/exp_unfreeze_recovery.sh <gpu>
 #
 set -u
-export CUDA_VISIBLE_DEVICES="${1:?usage: exp_unfreeze_recovery.sh <gpu>}"
+export CUDA_VISIBLE_DEVICES="${1:?usage: experiments/exp_unfreeze_recovery.sh <gpu>}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
@@ -76,7 +76,7 @@ run_one() {
         return
     fi
 
-    PY generate_dummy_cfg.py -m "$OUT_DIR" -s "$DATASET_DIR" >> "$LOG" 2>&1
+    PY tools/generate_dummy_cfg.py -m "$OUT_DIR" -s "$DATASET_DIR" >> "$LOG" 2>&1
     if PY render_mesh_splat_progressive.py \
         -m "$OUT_DIR" --gs_type lmg --skip_train --occlusion \
         --total_splats "$FINAL_SPLATS" --alloc_policy distortion_progressive \

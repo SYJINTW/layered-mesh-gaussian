@@ -23,8 +23,8 @@ POLICIES=("distortion_progressive")
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
 MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
@@ -209,7 +209,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                         render_start=$(date +%s)
                         RENDER_ITERATION=$((CURRENT_ITERATION + ITERATION))
                         
-                        python generate_dummy_cfg.py \
+                        python tools/generate_dummy_cfg.py \
                             -m "$SAVE_DIR"
 
                         if python render_mesh_splat_progressive.py \

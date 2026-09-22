@@ -1,48 +1,40 @@
 #!/bin/bash
-# This script runs a pipeline of warmup, training, rendering, and metrics for each experiment.
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+# This script runs the LMG pipeline of warmup, training, rendering, and metrics for each experiment.
 # It does not exit on the first error, but continues to the next experiment.
 # set -e
 
 # [NOTE] copy and modify the config for your own experiments
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=3
 
 # ======= Config ======
 
 # in decreasing order
 # 1 means only mesh, no splats
-# BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(2000)
+# BUDGETS=(80000 160000 320000)
+BUDGETS=(40000)
 
-# POLICIES=("uniform" "area" "planarity2" "distortion_progressive")
-# Using plain "distortion" (not distortion_progressive): confirmed 2026-07-09 by reading
-# both classes' _compute_distortion_weights that they're numerically identical whenever
-# no gaussians are passed (this call site never passes any) -- ProgressiveDistortionMap...
-# only diverges when compositing prior-round frozen GS into the render, which doesn't apply
-# here. distortion_progressive crashes through this (non-progressive) reader path anyway:
-# get_num_splats_per_triangle() only ever passes viewpoint_camera_infos=, but
-# ProgressiveDistortionMapBudgetingPolicy requires pre-resolved viewpoint_cameras= --
-# plumbing bug, not an algorithm difference. Plain "distortion" is the correct equivalent.
-POLICIES=("distortion")
+# POLICIES=("area" "distortion" "uniform" "planarity2")
+POLICIES=("uniform")
 
 # "--occlusion" or ""
-WHETHER_OCCLUSION=("--occlusion") 
+WHETHER_OCCLUSION=("--occlusion" ) 
 
 # can do sanity check in the logfile
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
-DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
-MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
+# [TODO] also check pure GS training results
+
+DATASET_BASE_DIR="/mnt/data1/syjintw/NEU/dataset" #! Change to your dataset path
+MESH_BASE_DIR="/mnt/data1/syjintw/NEU/dataset/milo_meshes" #! Change to your mesh path
 
 # ITERATION="15000"
-ITERATION="20"
-# SAVE_ITERATIONS=("7000") 
-SAVE_ITERATIONS=("10")
+ITERATION="30"
+SAVE_ITERATIONS=("10" "20") # Need to fill in some iterations or it will failed
 
-EXP_NAME="smoke_sanity_gsmesh"
+EXP_NAME="main_nerfsynthetic"
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
-SCENE_NAME_LIST=("bicycle")
+SCENE_NAME_LIST=("hotdog")
 
 MESH_TYPE="milo" # "sugar" or "colmap" or "milo"
 MESH_RASTERIZER_TYPE="nvdiffrast" # "pytorch3d" or "nvdiffrast"
@@ -50,20 +42,11 @@ MESH_RASTERIZER_TYPE="nvdiffrast" # "pytorch3d" or "nvdiffrast"
 RESOLUTION="" # or "--resolution 4" for faster debugging
 IS_WHITE_BG="" # set to "--white_background" if the dataset has white background
 
-DEBUGGING_FREQ="1000"
-
-SKIP_LPIPS=true # true or false; set to true to skip lpips computation to save time
+DEBUGGING_FREQ="10"
 
 for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
-    case "$SCENE_NAME" in
-        # bicycle budget must match exp_ablation.sh's FINAL=PERROUND(80000)*ROUNDS(4)=320000,
-        # not the shared BUDGETS=(32000) below -- a 10x mismatch here previously invalidated
-        # the gs_mesh-vs-single_rand comparison.
-        bicycle) MESHDIR=bicycle-dw50; IMAGES="-i images_4"; SCENE_BUDGETS=(320000) ;;
-        *)       MESHDIR="$SCENE_NAME"; IMAGES=""; SCENE_BUDGETS=("${BUDGETS[@]}") ;;
-    esac
-    DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}"
-    MESH_FILE="${MESH_BASE_DIR}/${MESHDIR}/${MESHDIR}.ply"
+    DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}" 
+    MESH_FILE="${MESH_BASE_DIR}/${SCENE_NAME}/${SCENE_NAME}.ply"
 
     MESH_IMG_DIR=$(dirname "$MESH_FILE")
 
@@ -100,7 +83,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
     # for scene_name in "${SCENE_NAMES[@]}"; do
     for IS_OCCLUSION in "${WHETHER_OCCLUSION[@]}"; do
         for policy in "${POLICIES[@]}"; do
-            for budget in "${SCENE_BUDGETS[@]}"; do
+            for budget in "${BUDGETS[@]}"; do
 
                 occlusion_tag="no_occlusion"
                 if [ "$IS_OCCLUSION" == "--occlusion" ]; then
@@ -140,11 +123,10 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                 # ======= Step 0: Warmup ======
                 echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
                 warmup_start=$(date +%s)
-                if python warmup.py --eval \
+                if python train.py --eval \
                     --warmup_only \
                     -s "$DATASET_DIR" \
                     -m "$SAVE_DIR" \
-                    $IMAGES \
                     --texture_obj_path "$MESH_FILE" \
                     --mesh_type "$MESH_TYPE" \
                     --debugging \
@@ -174,7 +156,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     failed_experiments=$((failed_experiments + 1))
                     echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
                 fi
-                
+
                 # ======= Step 1: Train ======
                 if [ "$exp_status" = "WARMUP_SUCCESS" ]; then
                     echo "Step 1/3: Running training..." | tee -a "$LOG_FILE"
@@ -182,7 +164,6 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     if python train.py --eval \
                         -s "$DATASET_DIR" \
                         -m "$SAVE_DIR" \
-                        $IMAGES \
                         --texture_obj_path "$MESH_FILE" \
                         --mesh_type "$MESH_TYPE" \
                         --debugging \
@@ -255,21 +236,14 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     exp_status="RENDER_FAILED"
                 fi
                 
+                exp_status="RENDER_SUCCESS"
                 # ======= Step 3: Metrics ======
                 if [ "$exp_status" = "RENDER_SUCCESS" ]; then
                     echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
                     metrics_start=$(date +%s)
-                    
-                    if [ "$SKIP_LPIPS" = true ]; then
-                        SKIP_LPIPS_ARG="--skip_lpips"
-                    else
-                        SKIP_LPIPS_ARG=""
-                    fi
-
                     if python metrics.py \
                         -m "$SAVE_DIR" \
-                        --gs_type gs_mesh $SKIP_LPIPS_ARG \
-                        >> "$LOG_FILE"; then
+                        --gs_type gs_mesh >> "$LOG_FILE"; then
                         
                         metrics_end=$(date +%s)
                         metrics_secs=$((metrics_end - metrics_start))

@@ -5,7 +5,7 @@
 
 # [NOTE] copy and modify the config for your own experiments
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 # ======= Config ======
 
@@ -14,27 +14,35 @@ export CUDA_VISIBLE_DEVICES=0
 # BUDGETS=(40000 80000 160000 320000 640000)
 BUDGETS=(2000)
 
-# POLICIES=("uniform" "area" "planarity2" "distortion")
+# POLICIES=("uniform" "area" "planarity2" "distortion_progressive")
+# Using plain "distortion" (not distortion_progressive): confirmed 2026-07-09 by reading
+# both classes' _compute_distortion_weights that they're numerically identical whenever
+# no gaussians are passed (this call site never passes any) -- ProgressiveDistortionMap...
+# only diverges when compositing prior-round frozen GS into the render, which doesn't apply
+# here. distortion_progressive crashes through this (non-progressive) reader path anyway:
+# get_num_splats_per_triangle() only ever passes viewpoint_camera_infos=, but
+# ProgressiveDistortionMapBudgetingPolicy requires pre-resolved viewpoint_cameras= --
+# plumbing bug, not an algorithm difference. Plain "distortion" is the correct equivalent.
 POLICIES=("distortion")
 
 # "--occlusion" or ""
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
 MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
 # ITERATION="15000"
-ITERATION="15000"
+ITERATION="20"
 # SAVE_ITERATIONS=("7000") 
-SAVE_ITERATIONS=("7000") # Need to fill in some iterations or it will failed
+SAVE_ITERATIONS=("10")
 
-EXP_NAME="sample_exp" #! Change to your experiment name
+EXP_NAME="smoke_sanity_gsmesh"
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
-SCENE_NAME_LIST=("hotdog")
+SCENE_NAME_LIST=("bicycle")
 
 MESH_TYPE="milo" # "sugar" or "colmap" or "milo"
 MESH_RASTERIZER_TYPE="nvdiffrast" # "pytorch3d" or "nvdiffrast"
@@ -47,8 +55,15 @@ DEBUGGING_FREQ="1000"
 SKIP_LPIPS=true # true or false; set to true to skip lpips computation to save time
 
 for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
-    DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}" 
-    MESH_FILE="${MESH_BASE_DIR}/${SCENE_NAME}/${SCENE_NAME}.ply"
+    case "$SCENE_NAME" in
+        # bicycle budget must match exp_ablation.sh's FINAL=PERROUND(80000)*ROUNDS(4)=320000,
+        # not the shared BUDGETS=(32000) below -- a 10x mismatch here previously invalidated
+        # the gs_mesh-vs-single_rand comparison.
+        bicycle) MESHDIR=bicycle-dw50; IMAGES="-i images_4"; SCENE_BUDGETS=(320000) ;;
+        *)       MESHDIR="$SCENE_NAME"; IMAGES=""; SCENE_BUDGETS=("${BUDGETS[@]}") ;;
+    esac
+    DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}"
+    MESH_FILE="${MESH_BASE_DIR}/${MESHDIR}/${MESHDIR}.ply"
 
     MESH_IMG_DIR=$(dirname "$MESH_FILE")
 
@@ -85,7 +100,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
     # for scene_name in "${SCENE_NAMES[@]}"; do
     for IS_OCCLUSION in "${WHETHER_OCCLUSION[@]}"; do
         for policy in "${POLICIES[@]}"; do
-            for budget in "${BUDGETS[@]}"; do
+            for budget in "${SCENE_BUDGETS[@]}"; do
 
                 occlusion_tag="no_occlusion"
                 if [ "$IS_OCCLUSION" == "--occlusion" ]; then
@@ -129,6 +144,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     --warmup_only \
                     -s "$DATASET_DIR" \
                     -m "$SAVE_DIR" \
+                    $IMAGES \
                     --texture_obj_path "$MESH_FILE" \
                     --mesh_type "$MESH_TYPE" \
                     --debugging \
@@ -166,6 +182,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     if python train.py --eval \
                         -s "$DATASET_DIR" \
                         -m "$SAVE_DIR" \
+                        $IMAGES \
                         --texture_obj_path "$MESH_FILE" \
                         --mesh_type "$MESH_TYPE" \
                         --debugging \

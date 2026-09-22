@@ -7,7 +7,7 @@
 # bash pipeline) -- full test-set render+score happens every round (needed for the
 # growth/quality curve, not just the final number).
 #
-#   bash exp_schedule_ablation.sh <group> <gpu>
+#   bash experiments/exp_schedule_ablation.sh <group> <gpu>
 #
 # Groups (2 GPUs):
 #   bicycle     : bicycle linear + bicycle quadratic + bicycle random seed=42       (3 configs)
@@ -20,17 +20,17 @@
 # else is confirmatory.
 #
 # Launch both groups in parallel, one per GPU:
-#   bash exp_schedule_ablation.sh bicycle 0 &
-#   bash exp_schedule_ablation.sh hotdog_ship 1 &
+#   bash experiments/exp_schedule_ablation.sh bicycle 0 &
+#   bash experiments/exp_schedule_ablation.sh hotdog_ship 1 &
 #
 # Idempotent: a config whose round_summary.json already has ROUNDS entries is skipped.
 
 set -u
-GROUP="${1:?usage: exp_schedule_ablation.sh <group> <gpu>}"
-export CUDA_VISIBLE_DEVICES="${2:?usage: exp_schedule_ablation.sh <group> <gpu>}"
+GROUP="${1:?usage: experiments/exp_schedule_ablation.sh <group> <gpu>}"
+export CUDA_VISIBLE_DEVICES="${2:?usage: experiments/exp_schedule_ablation.sh <group> <gpu>}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 

@@ -3,7 +3,7 @@
 # 2) smoke every new scene (2 rounds x 20 iters, distortion + mixed_area)
 # 3) gate on full-test-set n_views, then launch the real sweeps
 set -u
-cd "$(dirname "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
 for p in 381493 381494 381495; do
   until ! ps -p "$p" > /dev/null 2>&1; do sleep 15; done
 done
@@ -20,7 +20,7 @@ done; echo
 export POLICIES_OVERRIDE="distortion mixed_area"
 for s in lego ficus mic drjohnson; do
   echo "=== SMOKE $s $(date +%H:%M:%S) ==="
-  bash _smoke_rd_sweep.sh "$s" 0
+  bash experiments/smoke/_smoke_rd_sweep.sh "$s" 0
 done
 echo "=== SMOKE PHASE DONE $(date) ==="
 
@@ -42,12 +42,12 @@ done
 
 echo "=== GATE PASSED, LAUNCHING $(date) ==="
 TS=$(date +%Y%m%d_%H%M)
-nohup bash -c "bash exp_rd_sweep.sh lego 0 && bash exp_schedule_ablation.sh curves_hotdog_ship 0"  > "log/chain_gpu0_${TS}.log" 2>&1 &
+nohup bash -c "bash experiments/exp_rd_sweep.sh lego 0 && bash experiments/exp_schedule_ablation.sh curves_hotdog_ship 0"  > "log/chain_gpu0_${TS}.log" 2>&1 &
 echo "GPU0_CHAIN=$! (lego -> curves_hotdog_ship)"
-nohup bash -c "bash exp_rd_sweep.sh ficus 1 && bash exp_rd_sweep.sh mic 1"                          > "log/chain_gpu1_${TS}.log" 2>&1 &
+nohup bash -c "bash experiments/exp_rd_sweep.sh ficus 1 && bash experiments/exp_rd_sweep.sh mic 1"                          > "log/chain_gpu1_${TS}.log" 2>&1 &
 echo "GPU1_CHAIN=$! (ficus -> mic)"
-nohup bash -c "bash exp_rd_sweep.sh bicycle 2 && bash exp_schedule_ablation.sh curves_bicycle 2"    > "log/chain_gpu2_${TS}.log" 2>&1 &
+nohup bash -c "bash experiments/exp_rd_sweep.sh bicycle 2 && bash experiments/exp_schedule_ablation.sh curves_bicycle 2"    > "log/chain_gpu2_${TS}.log" 2>&1 &
 echo "GPU2_CHAIN=$! (bicycle -> curves_bicycle)"
-nohup bash exp_rd_sweep.sh drjohnson 3                                                             > "log/chain_gpu3_${TS}.log" 2>&1 &
+nohup bash experiments/exp_rd_sweep.sh drjohnson 3                                                             > "log/chain_gpu3_${TS}.log" 2>&1 &
 echo "GPU3_CHAIN=$! (drjohnson)"
 echo "=== LAUNCHED $(date) ==="

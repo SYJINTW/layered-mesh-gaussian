@@ -1,4 +1,5 @@
 #!/bin/bash
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
 # This script runs a pipeline of warmup, training, rendering, and metrics for each experiment.
 # It does not exit on the first error, but continues to the next experiment.
 # set -e
@@ -12,27 +13,26 @@ export CUDA_VISIBLE_DEVICES=0
 # in decreasing order
 # 1 means only mesh, no splats
 # BUDGETS=(40000 80000 160000 320000 640000)
-BUDGETS=(40000)
+BUDGETS=(100)
 
 # POLICIES=("uniform" "area" "planarity2" "distortion")
-POLICIES=("distortion_progressive")
+POLICIES=("distortion")
 
 # "--occlusion" or ""
 WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
-DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
-MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
+PROJECT_GLOBAL_PATH="/mnt/data1/syjintw/MMSys26_LMG/layered-mesh-gaussian" #! Change to your project path
+
+DATASET_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/images" #! Change to your dataset path
+MESH_BASE_DIR="${PROJECT_GLOBAL_PATH}/dataset/meshes" #! Change to your mesh path
 
 # ITERATION="15000"
 ITERATION="15000"
 # SAVE_ITERATIONS=("7000") 
 SAVE_ITERATIONS=("7000") # Need to fill in some iterations or it will failed
 
-# EXP_NAME="non_progressive" #! Change to your experiment name
-EXP_NAME="non_progressive_dynamic_alpha" #! Change to your experiment name
+EXP_NAME="sample_exp" #! Change to your experiment name
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
 SCENE_NAME_LIST=("hotdog")
@@ -93,9 +93,9 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     occlusion_tag="occlusion"
                 fi
                 
-                SAVE_DIR="${BASE_OUTPUT_DIR}/${policy}_${budget}_${occlusion_tag}/iteration_0" #! Hardcode
+                SAVE_DIR="${BASE_OUTPUT_DIR}/${policy}_${budget}_${occlusion_tag}/"
                 LOG_FILE="${SAVE_DIR}/log_pipeline_${policy}_${budget}_${occlusion_tag}.log"
-                POLICY_CACHED="${SAVE_DIR}/load_iter_0/${policy}_${budget}.npy" #! Hardcode
+                POLICY_CACHED="${SAVE_DIR}/${policy}_${budget}.npy"
 
                 # Ensure the save directory exists
                 mkdir -p "$SAVE_DIR"
@@ -126,42 +126,70 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                 # ======= Step 0: Warmup ======
                 echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
                 warmup_start=$(date +%s)
-                if python warmup_progressive.py --eval \
+                CMD="python -m legacy.warmup_dynamic --eval \
                     --warmup_only \
-                    -s "$DATASET_DIR" \
-                    -m "$SAVE_DIR" \
-                    --texture_obj_path "$MESH_FILE" \
-                    --mesh_type "$MESH_TYPE" \
+                    -s \"$DATASET_DIR\" \
+                    -m \"$SAVE_DIR\" \
+                    --texture_obj_path \"$MESH_FILE\" \
+                    --mesh_type \"$MESH_TYPE\" \
                     --debugging \
-                    --gs_type lmg \
+                    --debug_freq \"$DEBUGGING_FREQ\" \
                     $IS_OCCLUSION \
-                    --total_splats "$budget" \
-                    --alloc_policy "$policy" \
-                    --policy_path "$POLICY_CACHED" \
-                    --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                    --load_iter 0 \
-                    --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                    >> "$LOG_FILE" ; then
-                    # this is warmup
+                    --total_splats \"$budget\" \
+                    --alloc_policy \"$policy\" \
+                    --gs_type gs_mesh \
+                    --policy_path \"$POLICY_CACHED\" \
+                    --precaptured_mesh_img_path \"$MESH_IMG_DIR\" \
+                    $IS_WHITE_BG \
+                    $RESOLUTION \
+                    --iteration 1 \
+                    --mesh_rasterizer_type \"$MESH_RASTERIZER_TYPE\""
 
-                    warmup_end=$(date +%s)
-                    warmup_secs=$((warmup_end - warmup_start))
-                    echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
-                    exp_status="WARMUP_SUCCESS"
-                else
-                    warmup_end=$(date +%s)
-                    warmup_secs=$((warmup_end - warmup_start))
-                    exp_status="WARMUP_FAILED"
-                    failed_experiments=$((failed_experiments + 1))
-                    echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                fi
+                # 1. 印出指令到螢幕或 Log
+                echo "----------------------------------------"
+                echo "Running command: $CMD"
+                echo "----------------------------------------"
+
+                # if python -m legacy.warmup_dynamic --eval \
+                #     --warmup_only \
+                #     -s "$DATASET_DIR" \
+                #     -m "$SAVE_DIR" \
+                #     --texture_obj_path "$MESH_FILE" \
+                #     --mesh_type "$MESH_TYPE" \
+                #     --debugging \
+                #     --debug_freq "$DEBUGGING_FREQ" \
+                #     $IS_OCCLUSION \
+                #     --total_splats "$budget" \
+                #     --alloc_policy "$policy" \
+                #     --gs_type gs_mesh \
+                #     --policy_path "$POLICY_CACHED" \
+                #     --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                #     $IS_WHITE_BG \
+                #     $RESOLUTION \
+                #     --iteration 1 \
+                #     --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                #     >> "$LOG_FILE" ; then
+                    
+                #     # this is warmup
+
+                #     warmup_end=$(date +%s)
+                #     warmup_secs=$((warmup_end - warmup_start))
+                #     echo "Warmup completed in $(fmt_time $warmup_secs) (${warmup_secs}s)." | tee -a "$LOG_FILE"
+                #     exp_status="WARMUP_SUCCESS"
+                # else
+                #     warmup_end=$(date +%s)
+                #     warmup_secs=$((warmup_end - warmup_start))
+                #     exp_status="WARMUP_FAILED"
+                #     failed_experiments=$((failed_experiments + 1))
+                #     echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                # fi
                 
+                exp_status="WARMUP_SUCCESS"
                 # ======= Step 1: Train ======
                 if [ "$exp_status" = "WARMUP_SUCCESS" ]; then
                     echo "Step 1/3: Running training..." | tee -a "$LOG_FILE"
                     train_start=$(date +%s)
-                    GS_PATH="${SAVE_DIR}/point_cloud/iteration_0_warmup/point_cloud.ply"
-                    if python train_progressive.py --eval \
+                    CMD="python -m legacy.train_dynamic --eval \
                         -s "$DATASET_DIR" \
                         -m "$SAVE_DIR" \
                         --texture_obj_path "$MESH_FILE" \
@@ -173,29 +201,72 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                         --alloc_policy "$policy" \
                         --policy_path "$POLICY_CACHED" \
                         --precaptured_mesh_img_path "$MESH_IMG_DIR" \
-                        --gs_type lmg \
+                        --gs_type gs_mesh \
                         $IS_WHITE_BG \
                         $RESOLUTION \
                         --iteration "$ITERATION" \
                         --save_iterations "${SAVE_ITERATIONS[@]}" \
-                        --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
-                        --load_gs_path "$GS_PATH" \
-                        >> "$LOG_FILE"; then
+                        --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE""
+                    
+                    # 1. 印出指令到螢幕或 Log
+                    echo "----------------------------------------"
+                    echo "Running command: $CMD"
+                    echo "----------------------------------------"
+                    
+                #     if python -m legacy.train_dynamic --eval \
+                #         -s "$DATASET_DIR" \
+                #         -m "$SAVE_DIR" \
+                #         --texture_obj_path "$MESH_FILE" \
+                #         --mesh_type "$MESH_TYPE" \
+                #         --debugging \
+                #         --debug_freq "$DEBUGGING_FREQ" \
+                #         $IS_OCCLUSION \
+                #         --total_splats "$budget" \
+                #         --alloc_policy "$policy" \
+                #         --policy_path "$POLICY_CACHED" \
+                #         --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                #         --gs_type gs_mesh \
+                #         $IS_WHITE_BG \
+                #         $RESOLUTION \
+                #         --iteration "$ITERATION" \
+                #         --save_iterations "${SAVE_ITERATIONS[@]}" \
+                #         --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                #         >> "$LOG_FILE"; then
                         
-                        train_end=$(date +%s)
-                        train_secs=$((train_end - train_start))
-                        echo "Training completed in $(fmt_time $train_secs) (${train_secs}s)." | tee -a "$LOG_FILE"
-                        exp_status="TRAIN_SUCCESS"
-                    else
-                        train_end=$(date +%s)
-                        train_secs=$((train_end - train_start))
-                        exp_status="TRAIN_FAILED"
-                        failed_experiments=$((failed_experiments + 1))
-                        echo "ERROR: Training failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${train_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
-                    fi
+                #         train_end=$(date +%s)
+                #         train_secs=$((train_end - train_start))
+                #         echo "Training completed in $(fmt_time $train_secs) (${train_secs}s)." | tee -a "$LOG_FILE"
+                #         exp_status="TRAIN_SUCCESS"
+                #     else
+                #         train_end=$(date +%s)
+                #         train_secs=$((train_end - train_start))
+                #         exp_status="TRAIN_FAILED"
+                #         failed_experiments=$((failed_experiments + 1))
+                #         echo "ERROR: Training failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${train_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
+                #     fi
                 fi
 
                 # # ======= Step 2: Render ======
+                CMD="python render_mesh_splat.py \
+                -m "$SAVE_DIR" \
+                --gs_type gs_mesh \
+                --skip_train \
+                $IS_OCCLUSION \
+                --total_splats "$budget" \
+                --alloc_policy "$policy" \
+                --texture_obj_path "$MESH_FILE" \
+                --mesh_type "$MESH_TYPE" \
+                --precaptured_mesh_img_path "$MESH_IMG_DIR" \
+                $RESOLUTION \
+                $IS_WHITE_BG \
+                --policy_path "$POLICY_CACHED" \
+                --iteration "$iter" \
+                --mesh_rasterizer_type "$MESH_RASTERIZER_TYPE" \
+                "
+                echo "----------------------------------------"
+                echo "Running command: $CMD"
+                echo "----------------------------------------"
+
                 # render_success=true
                 # for iter in "${SAVE_ITERATIONS[@]}" "$ITERATION"; do
                 #     if [ "$exp_status" = "TRAIN_SUCCESS" ]; then
@@ -277,45 +348,45 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                 #     fi
                 # fi
 
-                # exp_end=$(date +%s)
-                # exp_secs=$((exp_end - exp_start))
-                # total_exp_seconds=$((total_exp_seconds + exp_secs))
+                exp_end=$(date +%s)
+                exp_secs=$((exp_end - exp_start))
+                total_exp_seconds=$((total_exp_seconds + exp_secs))
 
-                # {
-                #     echo ""
-                #     echo "-----------------------------------------------------------------"
-                #     echo "Finished pipeline: policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}"
-                #     echo "Final Status: ${exp_status}"
-                #     echo "Total duration: $(fmt_time $exp_secs) (${exp_secs}s)"
-                #     echo "  - Warmup:  $(fmt_time $warmup_secs) (${warmup_secs}s)"
-                #     echo "  - Train:   $(fmt_time $train_secs) (${train_secs}s)"
-                #     echo "  - Render:  $(fmt_time $render_secs) (${render_secs}s)"
-                #     echo "  - Metrics: $(fmt_time $metrics_secs) (${metrics_secs}s)"
-                #     echo "-----------------------------------------------------------------"
-                #     echo ""
-                # } | tee -a "$LOG_FILE"
+                {
+                    echo ""
+                    echo "-----------------------------------------------------------------"
+                    echo "Finished pipeline: policy=${policy}, budget=${budget}, occlusion=${occlusion_tag}"
+                    echo "Final Status: ${exp_status}"
+                    echo "Total duration: $(fmt_time $exp_secs) (${exp_secs}s)"
+                    echo "  - Warmup:  $(fmt_time $warmup_secs) (${warmup_secs}s)"
+                    echo "  - Train:   $(fmt_time $train_secs) (${train_secs}s)"
+                    echo "  - Render:  $(fmt_time $render_secs) (${render_secs}s)"
+                    echo "  - Metrics: $(fmt_time $metrics_secs) (${metrics_secs}s)"
+                    echo "-----------------------------------------------------------------"
+                    echo ""
+                } | tee -a "$LOG_FILE"
 
-                # # Copy log file to centralized log directory
-                # LOG_FILE_COPY="${BASE_LOG_DIR}/log_pipeline_${policy}_${budget}_${occlusion_tag}.log"
-                # cp "$LOG_FILE" "$LOG_FILE_COPY"
+                # Copy log file to centralized log directory
+                LOG_FILE_COPY="${BASE_LOG_DIR}/log_pipeline_${policy}_${budget}_${occlusion_tag}.log"
+                cp "$LOG_FILE" "$LOG_FILE_COPY"
 
-                # printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n" \
-                #     "$policy" "$budget" "$occlusion_tag" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$exp_secs" "$exp_status" >> "$TIMING_SUMMARY"
+                printf "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n" \
+                    "$policy" "$budget" "$occlusion_tag" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$exp_secs" "$exp_status" >> "$TIMING_SUMMARY"
             done
         done
     done
 
-    # total_end=$(date +%s)
-    # wall_secs=$((total_end - total_start))
-    # echo "================================================================="
-    # echo "All pipelines completed."
-    # echo "Wall-clock total: $(fmt_time "$wall_secs") (${wall_secs}s)"
-    # echo "Sum of experiment durations: $(fmt_time "$total_exp_seconds") (${total_exp_seconds}s)"
-    # printf "TOTAL\t\t\t%d\t%d\t%d\t%d\t%d\tTOTAL_SUM\n" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$total_exp_seconds" >> "$TIMING_SUMMARY"
-    # echo "Failed experiments: ${failed_experiments}"
-    # echo "Timing summary saved to: ${TIMING_SUMMARY}"
-    # if [ $failed_experiments -gt 0 ]; then
-    #     echo "Failed experiments log: ${FAILED_LOG}"
-    # fi
-    # echo "================================================================="
+    total_end=$(date +%s)
+    wall_secs=$((total_end - total_start))
+    echo "================================================================="
+    echo "All pipelines completed."
+    echo "Wall-clock total: $(fmt_time "$wall_secs") (${wall_secs}s)"
+    echo "Sum of experiment durations: $(fmt_time "$total_exp_seconds") (${total_exp_seconds}s)"
+    printf "TOTAL\t\t\t%d\t%d\t%d\t%d\t%d\tTOTAL_SUM\n" "$warmup_secs" "$train_secs" "$render_secs" "$metrics_secs" "$total_exp_seconds" >> "$TIMING_SUMMARY"
+    echo "Failed experiments: ${failed_experiments}"
+    echo "Timing summary saved to: ${TIMING_SUMMARY}"
+    if [ $failed_experiments -gt 0 ]; then
+        echo "Failed experiments log: ${FAILED_LOG}"
+    fi
+    echo "================================================================="
 done

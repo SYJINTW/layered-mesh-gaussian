@@ -4,16 +4,16 @@
 # question. Runs ALL policies below for ONE scene on ONE gpu, sequentially.
 # Launch one instance per scene to parallelize across GPUs.
 #
-#   bash exp_policy_sweep.sh <scene> <gpu>      # scene: hotdog | ship | bicycle
+#   bash experiments/exp_policy_sweep.sh <scene> <gpu>      # scene: hotdog | ship | bicycle
 #
 # Idempotent: a policy whose results_gs_mesh.json exists is skipped (safe to relaunch).
 
 set -u
-SCENE_ARG="${1:?usage: exp_policy_sweep.sh <scene> <gpu>}"
-export CUDA_VISIBLE_DEVICES="${2:?usage: exp_policy_sweep.sh <scene> <gpu>}"
+SCENE_ARG="${1:?usage: experiments/exp_policy_sweep.sh <scene> <gpu>}"
+export CUDA_VISIBLE_DEVICES="${2:?usage: experiments/exp_policy_sweep.sh <scene> <gpu>}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 

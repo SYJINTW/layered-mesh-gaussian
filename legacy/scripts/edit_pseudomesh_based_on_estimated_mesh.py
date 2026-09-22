@@ -2,7 +2,7 @@ import torch
 import trimesh
 from sklearn.neighbors import KDTree
 from argparse import ArgumentParser
-from scripts.save_pseudomesh import write_simple_obj
+from legacy.scripts.save_pseudomesh import write_simple_obj
 
 
 def calc_new_vertices_position(alpha, normal, vec_1, vec_2, vertice_1):

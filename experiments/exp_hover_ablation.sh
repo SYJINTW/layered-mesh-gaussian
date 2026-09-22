@@ -3,17 +3,17 @@
 # Single round = --rounds 1 (full budget in round 1, no growth) -- direct comparison
 # of LMGModel (gs_type=lmg) vs LMGModelHover (gs_type=lmg_hover) at matched budget.
 #
-#   bash exp_hover_ablation.sh <gs_type: lmg|lmg_hover> <gpu> <scene: hotdog|hotdog_colmap|bicycle>
+#   bash experiments/exp_hover_ablation.sh <gs_type: lmg|lmg_hover> <gpu> <scene: hotdog|hotdog_colmap|bicycle>
 #
 # Idempotent: a config whose round_summary.json already has 1 round entry is skipped.
 
 set -u
-GS_TYPE="${1:?usage: exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
-export CUDA_VISIBLE_DEVICES="${2:?usage: exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
-SCENE="${3:?usage: exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
+GS_TYPE="${1:?usage: experiments/exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
+export CUDA_VISIBLE_DEVICES="${2:?usage: experiments/exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
+SCENE="${3:?usage: experiments/exp_hover_ablation.sh <lmg|lmg_hover> <gpu> <hotdog|hotdog_colmap|bicycle>}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
@@ -44,8 +44,8 @@ case "$SCENE" in
         ;;
     bicycle_colmap)
         DATASET_DIR="$DATASET_BASE_DIR/bicycle"
-        MESH_FILE="$SCRIPT_DIR/dataset/colmap/bicycle/downsampled_30/mesh.ply"
-        MESH_IMG_DIR="$SCRIPT_DIR/dataset/colmap/bicycle/downsampled_30_lmg_precapture"
+        MESH_FILE="$REPO_ROOT/dataset/colmap/bicycle/downsampled_30/mesh.ply"
+        MESH_IMG_DIR="$REPO_ROOT/dataset/colmap/bicycle/downsampled_30_lmg_precapture"
         MESH_TYPE="colmap"
         IMAGES="-i images_4"
         BUDGETS=(320000)  # matches bicycle's established single-budget convention this session

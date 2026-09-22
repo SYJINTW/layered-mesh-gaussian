@@ -1,36 +1,37 @@
 #!/bin/bash
-# This script runs the LMG pipeline of warmup, training, rendering, and metrics for each experiment.
+# This script runs a pipeline of warmup, training, rendering, and metrics for each experiment.
 # It does not exit on the first error, but continues to the next experiment.
 # set -e
 
 # [NOTE] copy and modify the config for your own experiments
 
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=0
 
 # ======= Config ======
 
 # in decreasing order
 # 1 means only mesh, no splats
-# BUDGETS=(80000 160000 320000)
-BUDGETS=(40000)
+# BUDGETS=(40000 80000 160000 320000 640000)
+BUDGETS=(2000)
 
-# POLICIES=("area" "distortion" "uniform" "planarity2")
-POLICIES=("uniform")
+# POLICIES=("uniform" "area" "planarity2" "distortion")
+POLICIES=("distortion")
 
 # "--occlusion" or ""
-WHETHER_OCCLUSION=("--occlusion" ) 
+WHETHER_OCCLUSION=("--occlusion") 
 
 # can do sanity check in the logfile
-# [TODO] also check pure GS training results
-
-DATASET_BASE_DIR="/mnt/data1/syjintw/NEU/dataset" #! Change to your dataset path
-MESH_BASE_DIR="/mnt/data1/syjintw/NEU/dataset/milo_meshes" #! Change to your mesh path
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
+DATASET_BASE_DIR="${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh (cp env.local.sh.example env.local.sh)}"
+MESH_BASE_DIR="${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
 # ITERATION="15000"
-ITERATION="30"
-SAVE_ITERATIONS=("10" "20") # Need to fill in some iterations or it will failed
+ITERATION="15000"
+# SAVE_ITERATIONS=("7000") 
+SAVE_ITERATIONS=("7000") # Need to fill in some iterations or it will failed
 
-EXP_NAME="main_nerfsynthetic"
+EXP_NAME="sample_exp" #! Change to your experiment name
 
 # SCENE_NAME_LIST=("ficus" "hotdog" "lego" "mic" "ship")
 SCENE_NAME_LIST=("hotdog")
@@ -41,7 +42,9 @@ MESH_RASTERIZER_TYPE="nvdiffrast" # "pytorch3d" or "nvdiffrast"
 RESOLUTION="" # or "--resolution 4" for faster debugging
 IS_WHITE_BG="" # set to "--white_background" if the dataset has white background
 
-DEBUGGING_FREQ="10"
+DEBUGGING_FREQ="1000"
+
+SKIP_LPIPS=true # true or false; set to true to skip lpips computation to save time
 
 for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
     DATASET_DIR="${DATASET_BASE_DIR}/${SCENE_NAME}" 
@@ -122,7 +125,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                 # ======= Step 0: Warmup ======
                 echo "Step 0/3: Running warmup..." | tee -a "$LOG_FILE"
                 warmup_start=$(date +%s)
-                if python train.py --eval \
+                if python warmup.py --eval \
                     --warmup_only \
                     -s "$DATASET_DIR" \
                     -m "$SAVE_DIR" \
@@ -155,7 +158,7 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     failed_experiments=$((failed_experiments + 1))
                     echo "ERROR: Warmup failed for policy=${policy}, budget=${budget}, occlusion=${occlusion_tag} after ${warmup_secs}s." | tee -a "$LOG_FILE" "$FAILED_LOG"
                 fi
-
+                
                 # ======= Step 1: Train ======
                 if [ "$exp_status" = "WARMUP_SUCCESS" ]; then
                     echo "Step 1/3: Running training..." | tee -a "$LOG_FILE"
@@ -235,14 +238,21 @@ for SCENE_NAME in "${SCENE_NAME_LIST[@]}"; do
                     exp_status="RENDER_FAILED"
                 fi
                 
-                exp_status="RENDER_SUCCESS"
                 # ======= Step 3: Metrics ======
                 if [ "$exp_status" = "RENDER_SUCCESS" ]; then
                     echo "Step 3/3: Running metrics evaluation..." | tee -a "$LOG_FILE"
                     metrics_start=$(date +%s)
+                    
+                    if [ "$SKIP_LPIPS" = true ]; then
+                        SKIP_LPIPS_ARG="--skip_lpips"
+                    else
+                        SKIP_LPIPS_ARG=""
+                    fi
+
                     if python metrics.py \
                         -m "$SAVE_DIR" \
-                        --gs_type gs_mesh >> "$LOG_FILE"; then
+                        --gs_type gs_mesh $SKIP_LPIPS_ARG \
+                        >> "$LOG_FILE"; then
                         
                         metrics_end=$(date +%s)
                         metrics_secs=$((metrics_end - metrics_start))

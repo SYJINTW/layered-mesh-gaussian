@@ -2,7 +2,7 @@
 # 2x2 ablation of the two LMG++ mechanisms (Progressive freeze, Fixed alpha) vs LMGModel baseline.
 # Runs ALL 4 configs for ONE scene on ONE gpu, sequentially. Launch one instance per scene to parallelize.
 #
-#   bash exp_ablation.sh <scene> <gpu>      # scene: hotdog | ship | bicycle
+#   bash experiments/exp_ablation.sh <scene> <gpu>      # scene: hotdog | ship | bicycle
 #
 # Configs (all gs_type=lmg, all end at FINAL splats / 32000 iters):
 #   1 baseline    : single round, random alpha            (prog OFF, fixed OFF)
@@ -13,11 +13,11 @@
 # Idempotent: a config whose results_lmg.json exists is skipped.
 
 set -u
-SCENE_ARG="${1:?usage: exp_ablation.sh <scene> <gpu>}"
-export CUDA_VISIBLE_DEVICES="${2:?usage: exp_ablation.sh <scene> <gpu>}"
+SCENE_ARG="${1:?usage: experiments/exp_ablation.sh <scene> <gpu>}"
+export CUDA_VISIBLE_DEVICES="${2:?usage: experiments/exp_ablation.sh <scene> <gpu>}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "$SCRIPT_DIR/env.local.sh" ] && source "$SCRIPT_DIR/env.local.sh"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+[ -f "$REPO_ROOT/env.local.sh" ] && source "$REPO_ROOT/env.local.sh"
 : "${DATASET_BASE_DIR:?Set DATASET_BASE_DIR in env.local.sh}"
 : "${MESH_BASE_DIR:?Set MESH_BASE_DIR in env.local.sh}"
 
@@ -76,7 +76,7 @@ run_single() {
             --start_iteration 0 >> "$LOG" 2>&1 || { echo "[FAIL train] $exp/$SCENE_ARG"; return; }
     fi
 
-    PY generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
+    PY tools/generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
     for it in "${SAVE_ITERS[@]}"; do
         PY render_mesh_splat_progressive.py -s "$DATASET_DIR" -m "$BASE" --gs_type lmg --skip_train $OCC \
             --total_splats "$FINAL" --alloc_policy "$POLICY" --texture_obj_path "$MESH_FILE" \
@@ -130,7 +130,7 @@ run_progressive() {
                 $FND --start_iteration "$CUR" >> "$LOG" 2>&1 || { echo "[FAIL train R$R] $exp/$SCENE_ARG"; return; }
         fi
 
-        PY generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
+        PY tools/generate_dummy_cfg.py -m "$BASE" -s "$DATASET_DIR" >> "$LOG" 2>&1
         PY render_mesh_splat_progressive.py -s "$DATASET_DIR" -m "$BASE" --gs_type lmg --skip_train $OCC \
             --total_splats "$PERROUND" --alloc_policy "$POLICY" --texture_obj_path "$MESH_FILE" \
             --mesh_type milo --precaptured_mesh_img_path "$MESH_IMG_DIR" $WBG $IMAGES \
